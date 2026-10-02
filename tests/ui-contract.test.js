@@ -269,3 +269,12 @@ test("自摸上摞对手视为普通手牌且钻牌只公开钻入张", () => {
   assert.match(appSource, /meld-drill-revealed/);
   assert.match(appSource, /钻牌，只亮出/);
 });
+
+test("更换昵称后创建或加入房间会切换玩家身份", () => {
+  assert.match(appSource, /PROFILE_NAME_KEY = "majiang:profileName"/);
+  assert.match(appSource, /function commitLobbyIdentity\(\)/);
+  assert.match(appSource, /normalizedName\(name\) !== normalizedName\(profileName\)/);
+  assert.match(appSource, /profileId = makeProfileId\(\)/);
+  assert.match(appSource, /commitLobbyIdentity\(\); send\(\{ type: "create"/);
+  assert.match(appSource, /commitLobbyIdentity\(\);\s*send\(\{ type: "join"/);
+});

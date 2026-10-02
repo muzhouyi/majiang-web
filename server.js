@@ -38,6 +38,8 @@ const defaultPatternPoints = {
   "三碰胡": 4,
   "四碰胡": 8,
   "钻胡": 6,
+  "门清": 0,
+  "缺门": 0,
   "杠上开花": 0
 };
 
@@ -355,6 +357,26 @@ function hasOneDragon(tiles) {
   });
 }
 
+function missingSuitCount(tiles) {
+  const presentSuits = new Set(
+    tiles.filter((tile) => ["m", "p", "s"].includes(tile[0])).map((tile) => tile[0])
+  );
+  return 3 - presentSuits.size;
+}
+
+function appendSharedPatterns(player, allTiles, patterns, { includeNormalPatterns = true } = {}) {
+  const pureOneSuit = isPureOneSuit(allTiles);
+  if (includeNormalPatterns && pureOneSuit) patterns.push("清一色");
+  if (!pureOneSuit) {
+    for (let count = missingSuitCount(allTiles); count > 0; count -= 1) {
+      patterns.push("缺门");
+    }
+  }
+  if (includeNormalPatterns && hasOneDragon(allTiles)) patterns.push("一条龙");
+  if ((player.melds || []).length === 0) patterns.push("门清");
+  return patterns;
+}
+
 function evaluateWin(player, concealedHand) {
   const melds = player.melds || [];
   const shape = standardShape(concealedHand, melds.length);
@@ -365,9 +387,11 @@ function evaluateWin(player, concealedHand) {
 
   if (player.route === "drill") {
     const drillCount = melds.filter((meld) => meld.type === "drill").length;
+    const valid = Boolean(shape && drillCount >= 3);
+    const patterns = valid ? appendSharedPatterns(player, allTiles, ["钻胡"], { includeNormalPatterns: false }) : [];
     return {
-      valid: Boolean(shape && drillCount >= 3),
-      patterns: drillCount >= 3 ? ["钻胡"] : [],
+      valid,
+      patterns,
       tripletCount,
       drillCount
     };
@@ -375,9 +399,11 @@ function evaluateWin(player, concealedHand) {
 
   if (player.route === "pung") {
     const pungName = tripletCount >= 4 ? "四碰胡" : "三碰胡";
+    const valid = Boolean(shape && tripletCount >= 3);
+    const patterns = valid ? appendSharedPatterns(player, allTiles, [pungName], { includeNormalPatterns: false }) : [];
     return {
-      valid: Boolean(shape && tripletCount >= 3),
-      patterns: tripletCount >= 3 ? [pungName] : [],
+      valid,
+      patterns,
       tripletCount,
       drillCount: 0
     };
@@ -394,8 +420,7 @@ function evaluateWin(player, concealedHand) {
   else if (thirteenBuKao) patterns.push("十三不靠");
   else if (luxurySevenPairs) patterns.push("豪华七对");
   else if (sevenPairs) patterns.push("七对");
-  if (valid && isPureOneSuit(allTiles)) patterns.push("清一色");
-  if (valid && hasOneDragon(allTiles)) patterns.push("一条龙");
+  if (valid) appendSharedPatterns(player, allTiles, patterns);
   return { valid, patterns, tripletCount, drillCount: 0 };
 }
 
@@ -1985,7 +2010,7 @@ function roomSnapshot(room, viewerSeat) {
       })()
       : null;
   return {
-    version: "4.1",
+    version: "4.2",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -2501,6 +2526,7 @@ module.exports = {
   isThirteenOrphans,
   isPureOneSuit,
   hasOneDragon,
+  missingSuitCount,
   evaluateWin,
   drillCompletionOptions,
   concealedKongOptions,

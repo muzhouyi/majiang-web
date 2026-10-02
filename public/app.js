@@ -12,6 +12,7 @@ const tileAssetMap = {
 
 const LAYOUT_KEY = "majiang:layoutMode";
 const PROFILE_KEY = "majiang:profileId";
+const PROFILE_NAME_KEY = "majiang:profileName";
 const DISCARD_SLOTS = 30;
 let socket;
 let state = null;
@@ -40,6 +41,8 @@ if (!profileId) {
   profileId = globalThis.crypto?.randomUUID?.() || `player-${Date.now()}-${Math.random().toString(36).slice(2)}`;
   localStorage.setItem(PROFILE_KEY, profileId);
 }
+let profileName = localStorage.getItem(PROFILE_NAME_KEY) || name;
+localStorage.setItem(PROFILE_NAME_KEY, profileName);
 let layoutMode = ["landscape", "portrait"].includes(localStorage.getItem(LAYOUT_KEY))
   ? localStorage.getItem(LAYOUT_KEY)
   : (window.innerWidth >= window.innerHeight ? "landscape" : "portrait");
@@ -69,6 +72,10 @@ function connect() {
       if (selfPlayer?.name && selfPlayer.name !== name) {
         name = selfPlayer.name;
         localStorage.setItem("majiang:name", name);
+      }
+      if (selfPlayer?.name) {
+        profileName = selfPlayer.name;
+        localStorage.setItem(PROFILE_NAME_KEY, profileName);
       }
       latestDiscardTileId = state.latestDiscardTileId || null;
       drawnTileId = state.drawnTileId || null;
@@ -130,6 +137,26 @@ function send(payload) {
     toast = "还没有连上服务器，请稍等。";
     render();
   }
+}
+
+function normalizedName(value) {
+  return String(value || "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("zh-CN");
+}
+
+function makeProfileId() {
+  return globalThis.crypto?.randomUUID?.() || `player-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
+function commitLobbyIdentity() {
+  const requestedName = app.querySelector("#nameInput")?.value.trim() || name || "玩家";
+  name = requestedName;
+  if (normalizedName(name) !== normalizedName(profileName)) {
+    profileId = makeProfileId();
+    profileName = name;
+    localStorage.setItem(PROFILE_KEY, profileId);
+    localStorage.setItem(PROFILE_NAME_KEY, profileName);
+  }
+  localStorage.setItem("majiang:name", name);
 }
 
 function setLobbyDirectoryOpen(open) {
@@ -275,7 +302,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v4.1</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v4.2</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -297,12 +324,12 @@ function renderLobby() {
     name = event.target.value.trim() || "玩家";
     localStorage.setItem("majiang:name", name);
   });
-  app.querySelector("#soloBtn").addEventListener("click", () => send({ type: "create", mode: "solo", name, profileId }));
-  app.querySelector("#createBtn").addEventListener("click", () => send({ type: "create", mode: "online", name, profileId }));
-  app.querySelector("#directoryBtn").addEventListener("click", () => { setLobbyDirectoryOpen(true); render(); send({ type: "listRooms", profileId }); });
+  app.querySelector("#soloBtn").addEventListener("click", () => { commitLobbyIdentity(); send({ type: "create", mode: "solo", name, profileId }); });
+  app.querySelector("#createBtn").addEventListener("click", () => { commitLobbyIdentity(); send({ type: "create", mode: "online", name, profileId }); });
+  app.querySelector("#directoryBtn").addEventListener("click", () => { commitLobbyIdentity(); setLobbyDirectoryOpen(true); render(); send({ type: "listRooms", profileId }); });
   app.querySelector("[data-directory-close]")?.addEventListener("click", () => { setLobbyDirectoryOpen(false); render(); });
   app.querySelector("[data-directory-refresh]")?.addEventListener("click", () => send({ type: "listRooms", profileId }));
-  app.querySelectorAll("[data-directory-join]").forEach((button) => button.addEventListener("click", () => send({ type: "join", roomId: button.dataset.directoryJoin, name, profileId })));
+  app.querySelectorAll("[data-directory-join]").forEach((button) => button.addEventListener("click", () => { commitLobbyIdentity(); send({ type: "join", roomId: button.dataset.directoryJoin, name, profileId }); }));
   app.querySelectorAll("[data-directory-delete]").forEach((button) => button.addEventListener("click", () => {
     if (window.confirm(`确定删除房间 ${button.dataset.directoryDelete} 吗？房间内的牌局会立即结束。`)) {
       send({ type: "adminDeleteRoom", roomId: button.dataset.directoryDelete });
@@ -311,7 +338,10 @@ function renderLobby() {
   app.querySelector("#lobbyForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const roomId = app.querySelector("#roomInput").value.trim().toUpperCase();
-    if (roomId) send({ type: "join", roomId, name, profileId });
+    if (roomId) {
+      commitLobbyIdentity();
+      send({ type: "join", roomId, name, profileId });
+    }
   });
   bindAdminEvents();
 }
@@ -380,7 +410,7 @@ function numberField(label, key, value, group = "root", note = "") {
 
 function renderAdminScoring() {
   const scoring = adminData.scoring;
-  const patterns = ["普通胡", "清一色", "七对", "豪华七对", "一条龙", "十三不靠", "十三幺", "三碰胡", "四碰胡", "钻胡", "杠上开花"];
+  const patterns = ["普通胡", "清一色", "门清", "缺门", "七对", "豪华七对", "一条龙", "十三不靠", "十三幺", "三碰胡", "四碰胡", "钻胡", "杠上开花"];
   return `<form class="admin-form" id="adminScoringForm">
     <section class="admin-section"><h3>基础结算</h3><div class="admin-number-grid">
       ${numberField("基础倍率", "baseMultiplier", scoring.baseMultiplier)}
@@ -440,7 +470,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v4.1</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v4.2</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>

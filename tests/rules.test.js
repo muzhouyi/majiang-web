@@ -10,6 +10,7 @@ const {
   isThirteenOrphans,
   isPureOneSuit,
   hasOneDragon,
+  missingSuitCount,
   evaluateWin,
   drillCompletionOptions,
   concealedKongOptions,
@@ -77,7 +78,7 @@ test("七对与豪华七对按四张相同牌区分", () => {
   assert.equal(isLuxurySevenPairs(sevenPairs), false);
   assert.equal(isSevenPairs(luxury), true);
   assert.equal(isLuxurySevenPairs(luxury), true);
-  assert.deepEqual(evaluateWin(playerWith(luxury), luxury).patterns, ["豪华七对"]);
+  assert.deepEqual(evaluateWin(playerWith(luxury), luxury).patterns, ["豪华七对", "门清"]);
 });
 
 test("十三不靠要求十四张不同且同花色数字至少相隔三", () => {
@@ -92,14 +93,44 @@ test("十三不靠要求十四张不同且同花色数字至少相隔三", () =>
 test("十三幺必须具备十三种幺九字牌并有一对", () => {
   const hand = ["m1", "m9", "p1", "p9", "s1", "s9", "E", "S", "W", "N", "C", "F", "P", "P"];
   assert.equal(isThirteenOrphans(hand), true);
-  assert.deepEqual(evaluateWin(playerWith(hand), hand).patterns, ["十三幺"]);
+  assert.deepEqual(evaluateWin(playerWith(hand), hand).patterns, ["十三幺", "门清"]);
 });
 
 test("清一色与一条龙读取完整手牌及副露牌", () => {
   const tiles = ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9", "m2", "m3", "m4", "m5", "m5"];
   assert.equal(isPureOneSuit(tiles), true);
   assert.equal(hasOneDragon(tiles), true);
-  assert.deepEqual(evaluateWin(playerWith(tiles), tiles).patterns, ["清一色", "一条龙"]);
+  assert.deepEqual(evaluateWin(playerWith(tiles), tiles).patterns, ["清一色", "一条龙", "门清"]);
+});
+
+test("缺一门计一次、缺两门计两次，清一色不再同时计缺门", () => {
+  const missingOne = ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9", "p2", "p3", "p4", "E", "E"];
+  const missingTwo = ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9", "E", "E", "E", "F", "F"];
+  const pure = ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8", "m9", "m2", "m3", "m4", "m5", "m5"];
+
+  assert.equal(missingSuitCount(missingOne), 1);
+  assert.deepEqual(evaluateWin(playerWith(missingOne), missingOne).patterns, ["缺门", "一条龙", "门清"]);
+  assert.equal(missingSuitCount(missingTwo), 2);
+  assert.deepEqual(evaluateWin(playerWith(missingTwo), missingTwo).patterns, ["缺门", "缺门", "一条龙", "门清"]);
+  assert.deepEqual(evaluateWin(playerWith(pure), pure).patterns, ["清一色", "一条龙", "门清"]);
+});
+
+test("碰、钻、暗杠和自摸暗刻上摞都会破门清", () => {
+  const concealed = ["m1", "m2", "m3", "m4", "m5", "m6", "p2", "p3", "p4", "s7", "s7", "s7", "E", "E"];
+  assert.ok(evaluateWin(playerWith(concealed), concealed).patterns.includes("门清"));
+
+  const breakingMelds = [
+    pong("s7"),
+    drill(["s5", "s6", "s7"]),
+    { type: "concealed-kong", tiles: ["s7", "s7", "s7", "s7"] },
+    { type: "concealed-pong", tiles: ["s7", "s7", "s7"], stacked: true }
+  ];
+  const reducedHand = ["m1", "m2", "m3", "m4", "m5", "m6", "p2", "p3", "p4", "E", "E"];
+  for (const meld of breakingMelds) {
+    const result = evaluateWin(playerWith(reducedHand, { melds: [meld] }), reducedHand);
+    assert.equal(result.valid, true);
+    assert.equal(result.patterns.includes("门清"), false);
+  }
 });
 
 test("上摞后只按三碰胡或四碰胡路线判定", () => {
@@ -110,7 +141,7 @@ test("上摞后只按三碰胡或四碰胡路线判定", () => {
   });
   const three = evaluateWin(threePungPlayer, threePungHand);
   assert.equal(three.valid, true);
-  assert.deepEqual(three.patterns, ["三碰胡"]);
+  assert.deepEqual(three.patterns, ["三碰胡", "缺门"]);
 
   const fourPungHand = ["m1", "m1", "m1", "p5", "p5"];
   const fourPungPlayer = playerWith(fourPungHand, {
@@ -119,7 +150,7 @@ test("上摞后只按三碰胡或四碰胡路线判定", () => {
   });
   const four = evaluateWin(fourPungPlayer, fourPungHand);
   assert.equal(four.valid, true);
-  assert.deepEqual(four.patterns, ["四碰胡"]);
+  assert.deepEqual(four.patterns, ["四碰胡", "缺门"]);
 
   const notEnough = playerWith(["m1", "m2", "m3", "m4", "m5", "m6", "p5", "p5"], {
     route: "pung",
@@ -191,7 +222,7 @@ test("明杠和暗杠均按三碰四碰路线中的一组刻子计算", () => {
       { type: "concealed-kong", tiles: ["F", "F", "F", "F"] }
     ]
   });
-  assert.deepEqual(evaluateWin(player, hand).patterns, ["三碰胡"]);
+  assert.deepEqual(evaluateWin(player, hand).patterns, ["三碰胡", "缺门"]);
 });
 
 test("暗杠对其他玩家显示四张牌背", () => {
