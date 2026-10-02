@@ -574,7 +574,7 @@ button.tile {
 }
 
 .tile-body {
-  fill: url("#tileFill");
+  fill: #fff8e9;
   stroke: rgba(0, 0, 0, 0.18);
   stroke-width: 1.15;
 }
@@ -625,7 +625,8 @@ button.tile {
 
 .pin-dot,
 .bamboo,
-.bird-art {
+.bird,
+.pip {
   vector-effect: non-scaling-stroke;
 }
 
