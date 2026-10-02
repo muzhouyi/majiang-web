@@ -266,7 +266,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v3.5</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v3.6</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -431,7 +431,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.5</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.6</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
@@ -609,7 +609,7 @@ function renderInfoContent() {
     ? '<button class="suggestion-button" type="button" data-action="suggestDiscard">建议</button>'
     : "";
   return `<section class="room-panel"><div><small>房间号</small><strong>${state.roomId}</strong></div><button type="button" data-action="copy">复制</button>${suggestionButton}${undoButton}${restartButton}<button class="danger-quiet" type="button" data-action="leave">退出房间</button></section>
-    ${adminSuggestion ? `<section class="suggestion-panel"><strong>推荐打 ${escapeHtml(adminSuggestion.tileName)}</strong><span>${escapeHtml(adminSuggestion.text)}</span></section>` : ""}
+    ${adminSuggestion ? renderSuggestionPanel(adminSuggestion) : ""}
     ${state.waitingForReconnect ? `<section class="restart-status"><strong>等待真人玩家重新加入</strong><span>${escapeHtml(state.waitingForReconnect.names.join("、"))} 的座位不会由电脑接管</span></section>` : ""}
     ${renderDiceSummary()}
     ${state.restartVote ? `<section class="restart-status"><strong>重新开局确认中</strong><span>${state.restartVote.approvedSeats.length} 个真人座位已同意，人机默认同意</span></section>` : ""}
@@ -617,6 +617,18 @@ function renderInfoContent() {
     ${renderResult()}
     <section class="score-panel"><h2>积分</h2>${state.players.filter(Boolean).map(renderScore).join("")}</section>
     <details class="log-panel" open><summary>牌局记录</summary><ol reversed>${state.log.map((entry, index) => `<li value="${entry.step || fallbackStep - index}">${escapeHtml(entry.text)}</li>`).join("")}</ol></details>`;
+}
+
+function renderSuggestionPanel(suggestion) {
+  const alternatives = (suggestion.alternatives || []).map((entry, index) => {
+    const wins = (entry.winningTiles || []).map((tile) => tileLabels[tile] || tile).join("、");
+    const kong = (entry.kongPaths || []).map((path) => {
+      const supplements = (path.supplementTiles || []).map((tile) => tileLabels[tile] || tile).join("、");
+      return `摸${path.tileName}可暗杠，立即净得${path.actionGain}分${path.supplementWinningCopies ? `；补牌听${supplements}，约${path.supplementWinningCopies}张` : ""}`;
+    }).join("；");
+    return `<li class="${index === 0 ? "is-best" : ""}"><b>${index === 0 ? "推荐" : "备选"}：打${escapeHtml(entry.tileName)}</b><span>${wins ? `听${escapeHtml(wins)}，约${entry.winningCopies}张` : `${entry.shanten}向听，${entry.effectiveCopies}张有效进张`}${kong ? `；${escapeHtml(kong)}` : ""}</span></li>`;
+  }).join("");
+  return `<section class="suggestion-panel"><strong>综合出牌建议</strong><span>${escapeHtml(suggestion.text)}</span>${alternatives ? `<ol>${alternatives}</ol>` : ""}</section>`;
 }
 
 function renderScore(player) {

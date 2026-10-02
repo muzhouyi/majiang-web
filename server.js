@@ -1387,6 +1387,57 @@ function distanceAfterDraw(player, hand, draw, shape) {
   return { shanten: distanceForShape(player, drawn, shape), shape };
 }
 
+function estimatedSelfDrawGain(room, seat, player, hand, gangShangKaiHua = false) {
+  const evaluation = evaluateWin(player, hand);
+  if (!evaluation.valid) return 0;
+  const scoring = adminData.scoring;
+  let points = seat === room.dealerSeat ? scoring.dealerBase : scoring.nonDealerBase;
+  for (const pattern of evaluation.patterns) points += scoring.patterns[pattern] || 0;
+  if (gangShangKaiHua) points += scoring.patterns["杠上开花"] || 0;
+  return points * scoring.selfDrawMultiplier * 3;
+}
+
+function concealedKongPaths(room, seat, player, hand) {
+  const paths = [];
+  for (const tile of new Set(hand)) {
+    if (countTile(hand, tile) !== 3) continue;
+    const kongCopies = Math.max(0, 4 - visibleTileCount(room, seat, tile));
+    if (!kongCopies) continue;
+    const reduced = [...hand, tile];
+    removeTiles(reduced, [tile, tile, tile, tile]);
+    const kongPlayer = {
+      ...player,
+      hand: reduced,
+      melds: [...(player.melds || []), { type: "concealed-kong", tiles: [tile, tile, tile, tile] }]
+    };
+    let supplementWinningCopies = 0;
+    let supplementExpectedGain = 0;
+    const supplementTiles = [];
+    for (const supplement of tileTypes) {
+      const copies = Math.max(0, 4 - visibleTileCount(room, seat, supplement) - Number(supplement === tile));
+      if (!copies) continue;
+      const supplemented = [...reduced, supplement];
+      const gain = estimatedSelfDrawGain(room, seat, kongPlayer, supplemented, true);
+      if (!gain) continue;
+      supplementWinningCopies += copies;
+      supplementExpectedGain += copies * gain;
+      supplementTiles.push(supplement);
+    }
+    const actionGain = (adminData.scoring.actions["暗杠"] || 0) * 3;
+    const unseenAfterKong = Math.max(1, room.wall?.length || 1);
+    paths.push({
+      tile,
+      tileName: tileName(tile),
+      kongCopies,
+      actionGain,
+      supplementWinningCopies,
+      supplementTiles,
+      expectedGain: kongCopies * (actionGain + supplementExpectedGain / unseenAfterKong)
+    });
+  }
+  return paths;
+}
+
 function visibleTileCount(room, viewerSeat, tile) {
   let count = room.seats[viewerSeat].hand.filter((entry) => entry === tile).length;
   for (const player of room.seats) {
@@ -1410,7 +1461,7 @@ function recommendDiscard(room, seat) {
     const patternTieBreak = handStructureScore(player, hand);
     const allTiles = playerTiles(player, hand);
     const patternBonus = (isPureOneSuit(allTiles) ? 5 : 0) + (hasOneDragon(allTiles) ? 4 : 0);
-    return { discard, hand, distance, winningCopies: 0, effectiveCopies: 0, effectiveTiles: [], patternTieBreak, patternBonus };
+    return { discard, hand, distance, winningCopies: 0, effectiveCopies: 0, effectiveTiles: [], expectedGain: 0, kongPaths: [], patternTieBreak, patternBonus };
   });
   const bestShanten = Math.min(...ranked.map((entry) => entry.distance.shanten));
   for (const entry of ranked) {
@@ -1423,13 +1474,17 @@ function recommendDiscard(room, seat) {
         entry.winningCopies += copies;
         entry.effectiveCopies += copies;
         entry.effectiveTiles.push(draw);
+        entry.expectedGain += copies * estimatedSelfDrawGain(room, seat, player, [...entry.hand, draw]);
       } else if (nextDistance.shanten < entry.distance.shanten) {
         entry.effectiveCopies += copies;
         entry.effectiveTiles.push(draw);
       }
     }
+    entry.kongPaths = concealedKongPaths(room, seat, player, entry.hand);
+    entry.expectedGain += entry.kongPaths.reduce((total, path) => total + path.expectedGain, 0);
   }
   ranked.sort((a, b) => a.distance.shanten - b.distance.shanten
+    || b.expectedGain - a.expectedGain
     || b.winningCopies - a.winningCopies
     || b.effectiveCopies - a.effectiveCopies
     || b.patternBonus - a.patternBonus
@@ -1437,6 +1492,17 @@ function recommendDiscard(room, seat) {
     || tileIndex.get(b.discard) - tileIndex.get(a.discard));
   const best = ranked[0];
   const draws = best.effectiveTiles.slice(0, 6).map(tileName).join("、");
+  const summarize = (entry) => ({
+    tile: entry.discard,
+    tileName: tileName(entry.discard),
+    shape: entry.distance.shape,
+    shanten: entry.distance.shanten,
+    winningCopies: entry.winningCopies,
+    winningTiles: entry.effectiveTiles,
+    effectiveCopies: entry.effectiveCopies,
+    expectedGain: Math.round(entry.expectedGain * 10) / 10,
+    kongPaths: entry.kongPaths
+  });
   return {
     tile: best.discard,
     tileName: tileName(best.discard),
@@ -1445,6 +1511,9 @@ function recommendDiscard(room, seat) {
     effectiveTiles: best.effectiveTiles,
     shanten: best.distance.shanten,
     shape: best.distance.shape,
+    expectedGain: Math.round(best.expectedGain * 10) / 10,
+    kongPaths: best.kongPaths,
+    alternatives: ranked.filter((entry) => entry.distance.shanten === bestShanten).slice(0, 3).map(summarize),
     text: best.winningCopies
       ? `建议打出${tileName(best.discard)}。按${best.distance.shape}分析，当前有${best.winningCopies}张可见余量的直接胡牌进张${draws ? `（${draws}）` : ""}。`
       : `建议打出${tileName(best.discard)}。按${best.distance.shape}分析，当前为${best.distance.shanten}向听，保留${best.effectiveCopies}张可见余量的有效进张${draws ? `（${draws}）` : ""}。`
@@ -1826,7 +1895,7 @@ function roomSnapshot(room, viewerSeat) {
       })()
       : null;
   return {
-    version: "3.5",
+    version: "3.6",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),

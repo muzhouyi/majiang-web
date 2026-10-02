@@ -242,3 +242,22 @@ test("最佳出牌建议识别十三幺并优先打出无关数牌", () => {
   assert.equal(suggestion.tile, "m5");
   assert.equal(suggestion.shape, "十三幺");
 });
+
+test("最佳出牌建议会列出打九万后摸七万暗杠并补牌的路线", () => {
+  const player = playerWith(["m3", "m4", "m5", "m7", "m7", "m7", "m8", "m8", "m9", "s3", "s4", "s5", "S", "S"]);
+  player.handTileIds = player.hand.map((_, index) => `kong-choice-${index}`);
+  const room = {
+    phase: "discard",
+    currentSeat: 0,
+    dealerSeat: 0,
+    wall: Array(60),
+    seats: [player, playerWith([]), playerWith([]), playerWith([])]
+  };
+  for (const seat of room.seats) { seat.discards ||= []; seat.melds ||= []; }
+  const suggestion = recommendDiscard(room, 0);
+  const discardNine = suggestion.alternatives.find((entry) => entry.tile === "m9");
+  assert.ok(discardNine);
+  assert.deepEqual(discardNine.winningTiles, ["m8", "S"]);
+  assert.equal(discardNine.kongPaths[0].tile, "m7");
+  assert.deepEqual(discardNine.kongPaths[0].supplementTiles, ["m8", "S"]);
+});
