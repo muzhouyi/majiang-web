@@ -255,7 +255,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v3.0</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v3.1</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -419,7 +419,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.0</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.1</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
@@ -551,6 +551,10 @@ function renderActions() {
     buttons.push('<button class="primary" type="button" data-action="approveRestart">同意重开</button>');
     buttons.push('<button class="danger-quiet" type="button" data-action="rejectRestart">拒绝</button>');
   }
+  if (state.undoVote && !state.undoVote.viewerApproved) {
+    buttons.push('<button class="primary" type="button" data-action="approveUndo">同意悔棋</button>');
+    buttons.push('<button class="danger-quiet" type="button" data-action="rejectUndo">拒绝悔棋</button>');
+  }
   if (state.canSelfWin) buttons.push('<button class="win" type="button" data-action="selfWin">自摸</button>');
   if (state.canRon) buttons.push('<button class="win" type="button" data-action="ron">胡</button>');
   if (state.canKong) buttons.push('<button class="call" type="button" data-action="kong">明杠</button>');
@@ -573,8 +577,12 @@ function renderInfoContent() {
   const restartButton = state.canRequestRestart
     ? '<button class="primary" type="button" data-action="requestRestart">重新开局</button>'
     : "";
-  return `<section class="room-panel"><div><small>房间号</small><strong>${state.roomId}</strong></div><button type="button" data-action="copy">复制</button>${restartButton}<button class="danger-quiet" type="button" data-action="leave">退出房间</button></section>
+  const undoButton = state.canRequestUndo
+    ? '<button type="button" data-action="requestUndo">悔棋</button>'
+    : "";
+  return `<section class="room-panel"><div><small>房间号</small><strong>${state.roomId}</strong></div><button type="button" data-action="copy">复制</button>${undoButton}${restartButton}<button class="danger-quiet" type="button" data-action="leave">退出房间</button></section>
     ${state.restartVote ? `<section class="restart-status"><strong>重新开局确认中</strong><span>${state.restartVote.approvedSeats.length} 个真人座位已同意，人机默认同意</span></section>` : ""}
+    ${state.undoVote ? `<section class="restart-status"><strong>悔棋确认中</strong><span>${state.undoVote.approvedSeats.length} 个真人座位已同意，人机默认同意</span></section>` : ""}
     ${renderResult()}
     <section class="score-panel"><h2>积分</h2>${state.players.filter(Boolean).map(renderScore).join("")}</section>
     <details class="log-panel" open><summary>牌局记录</summary><ol reversed>${state.log.map((entry, index) => `<li value="${entry.step || fallbackStep - index}">${escapeHtml(entry.text)}</li>`).join("")}</ol></details>`;
@@ -663,9 +671,11 @@ function bindGameEvents() {
         return;
       }
       if (action === "requestRestart" && !window.confirm("确定发起重新开局吗？所有真人玩家同意后才会重开。")) return;
+      if (action === "requestUndo" && !window.confirm("确定发起悔棋吗？所有真人玩家同意后才会退回上一操作节点。")) return;
       const messages = {
-        leave: { type: "leave" }, addBots: { type: "addBots" }, start: { type: "start" }, requestRestart: { type: "requestRestart" },
+        leave: { type: "leave" }, addBots: { type: "addBots" }, start: { type: "start" }, requestRestart: { type: "requestRestart" }, requestUndo: { type: "requestUndo" },
         approveRestart: { type: "respondRestart", approved: true }, rejectRestart: { type: "respondRestart", approved: false },
+        approveUndo: { type: "respondUndo", approved: true }, rejectUndo: { type: "respondUndo", approved: false },
         selfWin: { type: "selfWin" }, ron: { type: "ron" }, pong: { type: "pong" }, kong: { type: "kong" }, pass: { type: "pass" }
       };
       if (messages[action]) send(messages[action]);

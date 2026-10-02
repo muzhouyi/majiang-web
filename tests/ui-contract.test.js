@@ -210,3 +210,18 @@ test("玩家页提供积分明细开关和清单且牌局面板位于顶层", ()
   assert.match(cssSource, /\.layout-portrait \.mobile-info\s*\{[^}]*z-index:\s*180/);
   assert.match(appSource, /<\/header>\s*<details class="mobile-info"/);
 });
+
+test("对手明示牌匹配手牌尺寸且竖屏牌局面板完整显示", () => {
+  assert.match(cssSource, /\.opponent-melds \.tile-micro,[\s\S]*?width:\s*var\(--opponent-tile-width\);\s*height:\s*var\(--opponent-tile-height\);/);
+  assert.match(cssSource, /\.layout-portrait \.mobile-info\[open\]\s*\{[^}]*left:\s*max\(8px, env\(safe-area-inset-left\)\);[^}]*right:\s*max\(8px, env\(safe-area-inset-right\)\);[^}]*width:\s*auto;/);
+});
+
+test("牌局面板提供全员同意悔棋且人机默认同意", () => {
+  assert.match(appSource, /data-action="requestUndo"/);
+  assert.match(appSource, /data-action="approveUndo"/);
+  assert.match(appSource, /data-action="rejectUndo"/);
+  assert.match(serverSource, /function pushUndoCheckpoint/);
+  assert.match(serverSource, /function completeUndoVoteIfReady/);
+  assert.match(serverSource, /seat && !seat\.isBot/);
+  assert.match(serverSource, /restoreUndoCheckpoint/);
+});

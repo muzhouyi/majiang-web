@@ -238,6 +238,16 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 }
 .opponent-melds { position: absolute; z-index: 2; }
 .opponent-melds:empty { display: none; }
+.opponent-melds .tile-micro,
+.opponent-melds .stack-tile,
+.opponent-melds .stack-tile .tile,
+.opponent-melds .stack-tile .meld-back,
+.opponent-melds .meld-row .meld-back { width: var(--opponent-tile-width); height: var(--opponent-tile-height); }
+.opponent-melds .meld-row .meld-back { flex-basis: var(--opponent-tile-width); }
+.opponent-melds .meld-kong { min-width: calc(var(--opponent-tile-width) + var(--opponent-tile-width) + var(--opponent-tile-width) + var(--opponent-tile-width)); }
+.opponent-melds .meld-stacked { width: calc(var(--opponent-tile-width) + var(--opponent-tile-width)); height: calc(var(--opponent-tile-height) + 12px); }
+.opponent-melds .stack-right { left: var(--opponent-tile-width); }
+.opponent-melds .stack-upper { left: calc(var(--opponent-tile-width) / 2); }
 .seat-top .seat-head { position: absolute; left: 50%; top: 0; transform: translateX(-50%); }
 .seat-top .opponent-melds { right: 0; top: 31px; transform: rotate(180deg); }
 .seat-top .opponent-hand { position: absolute; left: 0; top: 76px; margin: 0; transform: rotate(180deg); }
@@ -537,7 +547,7 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 }
 .layout-portrait .mobile-info > summary { display: grid; place-items: center; min-width: 50px; height: 44px; list-style: none; border: 1px solid #52615b; border-radius: 6px; background: #1a2b25; font-size: 11px; cursor: pointer; }
 .layout-portrait .mobile-info > summary::-webkit-details-marker { display: none; }
-.layout-portrait .mobile-info[open] { width: min(320px, calc(100dvw - 16px)); max-height: calc(100dvh - 62px); overflow: auto; border: 1px solid #52615b; border-radius: 8px; background: #14231e; box-shadow: 0 12px 30px rgba(0,0,0,.4); }
+.layout-portrait .mobile-info[open] { left: max(8px, env(safe-area-inset-left)); right: max(8px, env(safe-area-inset-right)); width: auto; max-height: calc(100dvh - 62px); overflow: auto; border: 1px solid #52615b; border-radius: 8px; background: #14231e; box-shadow: 0 12px 30px rgba(0,0,0,.4); }
 .layout-portrait .mobile-info[open] > summary { position: sticky; top: 0; justify-content: end; padding-right: 12px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; }
 
 .layout-landscape .mobile-info {

@@ -416,6 +416,7 @@ function declareConcealedKong(room, seat, key) {
   const player = room.seats[seat];
   const option = concealedKongOptions(player).find((entry) => entry.key === key);
   if (!option) return false;
+  pushUndoCheckpoint(room, "暗杠");
   const removed = removeHandTiles(player, [option.tile, option.tile, option.tile, option.tile]);
   if (!removed) return false;
   player.melds.push({
@@ -542,6 +543,8 @@ function createRoom(hostClient, mode) {
     replayFrames: [],
     replaySaved: false,
     restartVote: null,
+    undoVote: null,
+    undoStack: [],
     timer: null,
     cleanupTimer: null,
     emptySince: null,
@@ -681,6 +684,8 @@ function startGame(room) {
   room.roundResult = null;
   room.pendingClaim = null;
   room.restartVote = null;
+  room.undoVote = null;
+  room.undoStack = [];
   for (const seat of room.seats) {
     seat.hand = [];
     seat.handTileIds = [];
@@ -756,11 +761,42 @@ function makeBotDeclarations(room, seat) {
   }
 }
 
+function pushUndoCheckpoint(room, label) {
+  const profileScores = {};
+  for (const player of room.seats) {
+    if (player?.profileId && adminData.players[player.profileId]) {
+      profileScores[player.profileId] = clone(adminData.players[player.profileId]);
+    }
+  }
+  room.undoStack ||= [];
+  room.undoStack.push({
+    label,
+    state: clone({
+      wall: room.wall,
+      currentSeat: room.currentSeat,
+      phase: room.phase,
+      lastDiscard: room.lastDiscard,
+      winner: room.winner,
+      roundResult: room.roundResult,
+      pendingClaim: room.pendingClaim,
+      log: room.log,
+      logSequence: room.logSequence,
+      replayFrames: room.replayFrames,
+      replaySaved: room.replaySaved,
+      seats: room.seats
+    }),
+    profileScores,
+    scoreHistoryIds: (adminData.playerScores.history || []).filter((entry) => entry.roomId === room.id).map((entry) => entry.id)
+  });
+  room.undoStack = room.undoStack.slice(-20);
+}
+
 function declareCompletedDrill(room, seat, key, silent = false) {
   if (room.winner || room.phase !== "discard" || room.currentSeat !== seat) return false;
   const player = room.seats[seat];
   const option = drillCompletionOptions(player).find((entry) => entry.key === key);
   if (!option) return false;
+  pushUndoCheckpoint(room, "钻了");
   const tiles = sortedHand([...option.pattern, option.waitingTile]);
   const removed = removeHandTiles(player, tiles);
   if (!removed) return false;
@@ -787,6 +823,7 @@ function declarePungStack(room, seat, key, silent = false) {
   const player = room.seats[seat];
   const option = stackOptions(player).find((entry) => entry.key === key);
   if (!option) return false;
+  pushUndoCheckpoint(room, "上摞");
   player.route = "pung";
 
   if (key.startsWith("meld:")) {
@@ -821,6 +858,7 @@ function discardTile(room, seatIndex, tileId, fallbackTile = "") {
     ? player.handTileIds.indexOf(tileId)
     : player.hand.indexOf(fallbackTile);
   if (index === -1) return false;
+  pushUndoCheckpoint(room, "出牌");
 
   const [discarded] = player.hand.splice(index, 1);
   const [discardedTileId] = player.handTileIds.splice(index, 1);
@@ -1240,6 +1278,86 @@ function completeRestartVoteIfReady(room) {
   return true;
 }
 
+function resumeRoomFlow(room) {
+  clearRoomTimer(room);
+  if (room.phase === "discard" && room.seats[room.currentSeat]?.isBot) {
+    room.timer = setTimeout(() => botDiscard(room), 360);
+  } else if (room.phase === "claim") {
+    scheduleBotClaim(room);
+  }
+}
+
+function restoreUndoCheckpoint(room, checkpoint) {
+  clearRoomTimer(room);
+  const currentSeats = room.seats.filter(Boolean);
+  Object.assign(room, clone(checkpoint.state));
+  for (const player of room.seats) {
+    if (!player?.profileId) continue;
+    const current = currentSeats.find((entry) => entry.profileId === player.profileId);
+    if (!current) continue;
+    player.id = current.id;
+    player.isBot = current.isBot;
+    player.connected = current.connected;
+    player.delegated = current.delegated;
+  }
+  for (const [profileId, profile] of Object.entries(checkpoint.profileScores || {})) {
+    adminData.players[profileId] = clone(profile);
+  }
+  const retainedIds = new Set(checkpoint.scoreHistoryIds || []);
+  adminData.playerScores.history = (adminData.playerScores.history || []).filter((entry) => entry.roomId !== room.id || retainedIds.has(entry.id));
+  room.undoVote = null;
+  room.restartVote = null;
+  addLog(room, `全体玩家同意悔棋，已退回“${checkpoint.label}”之前。`);
+  saveAdminData();
+  resumeRoomFlow(room);
+  scheduleRoomCleanup(room);
+  broadcastRoom(room);
+}
+
+function completeUndoVoteIfReady(room) {
+  const vote = room.undoVote;
+  if (!vote) return false;
+  const required = room.seats
+    .map((seat, index) => seat && !seat.isBot ? index : -1)
+    .filter((seat) => seat >= 0);
+  if (!required.every((seat) => vote.approvedSeats.includes(seat))) return false;
+  const checkpoint = room.undoStack.pop();
+  if (!checkpoint) {
+    room.undoVote = null;
+    resumeRoomFlow(room);
+    broadcastRoom(room);
+    return false;
+  }
+  restoreUndoCheckpoint(room, checkpoint);
+  return true;
+}
+
+function requestUndo(room, client) {
+  if (client.seat < 0 || room.phase === "waiting" || room.phase === "ended" || room.undoVote || room.restartVote || !room.undoStack?.length) return false;
+  clearRoomTimer(room);
+  room.undoVote = { requestedBySeat: client.seat, approvedSeats: [client.seat], createdAt: Date.now() };
+  addLog(room, `${room.seats[client.seat].name} 发起悔棋，等待其他真人玩家同意。`);
+  if (!completeUndoVoteIfReady(room)) broadcastRoom(room);
+  return true;
+}
+
+function respondUndo(room, client, approved) {
+  const vote = room.undoVote;
+  if (!vote || client.seat < 0) return false;
+  if (!approved) {
+    const name = room.seats[client.seat]?.name || "玩家";
+    room.undoVote = null;
+    addLog(room, `${name} 拒绝悔棋，本次请求已取消。`);
+    resumeRoomFlow(room);
+    broadcastRoom(room);
+    return true;
+  }
+  if (!vote.approvedSeats.includes(client.seat)) vote.approvedSeats.push(client.seat);
+  addLog(room, `${room.seats[client.seat].name} 同意悔棋。`);
+  if (!completeUndoVoteIfReady(room)) broadcastRoom(room);
+  return true;
+}
+
 function delegateSeat(room, seatIndex, reason = "离开") {
   const player = room.seats[seatIndex];
   if (!player || player.isBot) return;
@@ -1251,6 +1369,7 @@ function delegateSeat(room, seatIndex, reason = "离开") {
   player.delegated = true;
   scheduleRoomCleanup(room);
   addLog(room, `${player.name} ${reason}，已由电脑托管。`);
+  if (completeUndoVoteIfReady(room)) return;
   if (completeRestartVoteIfReady(room)) return;
   broadcastRoom(room);
   if (room.phase === "discard" && room.currentSeat === seatIndex) {
@@ -1273,7 +1392,7 @@ function leaveRoom(client) {
 
 function requestRestart(room, client) {
   if (!isRoomHost(room, client) || room.phase === "waiting") return false;
-  if (room.restartVote) return false;
+  if (room.restartVote || room.undoVote) return false;
   room.restartVote = {
     requestedBySeat: client.seat,
     approvedSeats: [client.seat],
@@ -1313,7 +1432,7 @@ function roomSnapshot(room, viewerSeat) {
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   const viewerIsHost = viewer?.profileId === room.hostProfileId;
   return {
-    version: "3.0",
+    version: "3.1",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -1335,7 +1454,13 @@ function roomSnapshot(room, viewerSeat) {
     canPass: isResponder,
     canDiscard: viewerTurn,
     canKick: viewerIsHost && room.phase === "waiting",
-    canRequestRestart: viewerIsHost && room.phase !== "waiting" && !room.restartVote,
+    canRequestRestart: viewerIsHost && room.phase !== "waiting" && !room.restartVote && !room.undoVote,
+    canRequestUndo: room.phase !== "waiting" && room.phase !== "ended" && Boolean(room.undoStack?.length) && !room.undoVote,
+    undoVote: room.undoVote ? {
+      requestedBySeat: room.undoVote.requestedBySeat,
+      approvedSeats: [...room.undoVote.approvedSeats],
+      viewerApproved: room.undoVote.approvedSeats.includes(viewerSeat)
+    } : null,
     restartVote: room.restartVote ? {
       requestedBySeat: room.restartVote.requestedBySeat,
       approvedSeats: [...room.restartVote.approvedSeats],
@@ -1613,6 +1738,7 @@ function handleMessage(client, message) {
     const room = rooms.get(client.roomId);
     if (!room) return;
     markRoomActivity(room);
+    if (room.undoVote && !["respondUndo", "leave"].includes(data.type)) return;
     if (data.type === "addBots" && isRoomHost(room, client) && room.phase === "waiting") {
       fillBots(room);
       broadcastRoom(room);
@@ -1652,6 +1778,10 @@ function handleMessage(client, message) {
       requestRestart(room, client);
     } else if (data.type === "respondRestart") {
       respondRestart(room, client, Boolean(data.approved));
+    } else if (data.type === "requestUndo") {
+      requestUndo(room, client);
+    } else if (data.type === "respondUndo") {
+      respondUndo(room, client, Boolean(data.approved));
     }
   } catch (error) {
     sendJson(client.socket, { type: "error", message: error.message });

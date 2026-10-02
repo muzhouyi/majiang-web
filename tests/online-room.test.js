@@ -79,7 +79,21 @@ test("大厅、房主踢人、托管重连和全员重开可以连贯完成", as
   host.send({ type: "addBots" });
   await host.waitFor((payload) => payload.type === "state" && payload.state.players.filter(Boolean).length === 4);
   host.send({ type: "start" });
-  await host.waitFor((payload) => payload.type === "state" && payload.state.phase === "discard");
+  const started = await host.waitFor((payload) => payload.type === "state" && payload.state.phase === "discard");
+  const hostSeat = started.state.viewerSeat;
+  const firstTileId = started.state.players[hostSeat].hand[0].tileId;
+  host.send({ type: "discard", tileId: firstTileId });
+  await guest.waitFor((payload) => payload.type === "state" && payload.state.latestDiscardTileId === firstTileId);
+  host.send({ type: "requestUndo" });
+  await guest.waitFor((payload) => payload.type === "state" && payload.state.undoVote && !payload.state.undoVote.viewerApproved);
+  guest.send({ type: "respondUndo", approved: true });
+  const undone = await host.waitFor((payload) => payload.type === "state"
+    && payload.state.phase === "discard"
+    && !payload.state.undoVote
+    && payload.state.latestDiscardTileId === null
+    && payload.state.players[hostSeat].hand?.length === 14);
+  assert.equal(undone.state.currentSeat, hostSeat);
+  assert.equal(undone.state.players[hostSeat].hand.length, 14);
 
   guest.close();
   await host.waitFor((payload) => payload.type === "state" && payload.state.players[guestSeat]?.delegated === true);
