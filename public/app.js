@@ -73,7 +73,7 @@ function connect() {
       if (payload.message) toast = payload.message;
     } else if (payload.type === "adminReplay") {
       adminReplay = payload.replay;
-      replayFrameIndex = Math.max(0, payload.replay.frames.length - 1);
+      replayFrameIndex = 0;
       adminTab = "replay";
       adminOpen = true;
     } else if (payload.type === "adminError") {
@@ -197,7 +197,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v2.3</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v2.4</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -316,10 +316,15 @@ function renderReplayViewer() {
     <header><button type="button" data-close-replay aria-label="返回回放列表">‹</button><div><strong>${escapeHtml(adminReplay.roomId)} · 第 ${frame.step} 步</strong><small>${escapeHtml(frame.text)}</small></div><b>余牌 ${frame.wallCount}</b></header>
     <div class="replay-table">${frame.players.map((player) => `<section class="replay-seat replay-seat-${player.seat}">
       <div class="replay-player"><span class="wind">${player.wind}</span><strong>${escapeHtml(player.name)}</strong><em>${player.score}</em></div>
-      <div class="replay-melds">${player.melds.map((meld) => renderMeld({ ...meld, hidden: meld.type === "concealed-kong" || meld.type === "concealed-pong" || meld.type === "drill" })).join("")}</div>
-      <div class="replay-discards">${player.discards.map((entry) => renderTile(entry, { size: "micro" })).join("")}</div>
+      <div class="replay-hand" aria-label="${escapeHtml(player.name)}的手牌">${(player.hand || []).map((entry) => renderTile(entry, { size: "micro" })).join("")}</div>
+      <div class="replay-melds">${(player.melds || []).map((meld) => renderMeld({ ...meld, hidden: false })).join("")}</div>
+      <div class="replay-discards">${(player.discards || []).map((entry) => renderTile(entry, { size: "micro" })).join("")}</div>
     </section>`).join("")}</div>
-    <label class="replay-scrubber"><span>${replayFrameIndex + 1} / ${adminReplay.frames.length}</span><input type="range" min="0" max="${adminReplay.frames.length - 1}" value="${replayFrameIndex}" data-replay-frame /></label>
+    <div class="replay-controls">
+      <button type="button" data-replay-previous ${replayFrameIndex <= 0 ? "disabled" : ""} aria-label="上一步">‹ <span>上一步</span></button>
+      <label class="replay-scrubber"><span>${replayFrameIndex + 1} / ${adminReplay.frames.length}</span><input type="range" min="0" max="${adminReplay.frames.length - 1}" value="${replayFrameIndex}" data-replay-frame /></label>
+      <button type="button" data-replay-next ${replayFrameIndex >= adminReplay.frames.length - 1 ? "disabled" : ""} aria-label="下一步"><span>下一步</span> ›</button>
+    </div>
   </section>`;
 }
 
@@ -332,7 +337,8 @@ function renderAdminReplay() {
 
 function renderAdminPlayers() {
   const players = adminData.players || [];
-  return `<section class="admin-section"><h3>真实玩家积分</h3><div class="player-admin-list">${players.length ? players.map((player) => `<form class="player-admin-row" data-player-form="${escapeHtml(player.id)}"><span><strong>${escapeHtml(player.name)}</strong><small>${new Date(player.updatedAt).toLocaleString()}</small></span><input type="number" value="${player.score}" data-player-score aria-label="${escapeHtml(player.name)}的积分" /><button type="submit">修改</button><button type="button" class="danger-quiet" data-reset-player="${escapeHtml(player.id)}">重置</button></form>`).join("") : '<p class="admin-empty">暂无真实玩家记录。</p>'}</div></section>`;
+  return `<section class="admin-section player-score-settings"><label class="admin-toggle"><span><strong>记录玩家积分变动</strong><small>关闭后牌局仍正常结算，但不再把变化累计到真实玩家档案。</small></span><input type="checkbox" data-player-scores-enabled ${adminData.playerScores?.enabled !== false ? "checked" : ""} /></label></section>
+  <section class="admin-section"><h3>真实玩家积分</h3><div class="player-admin-list">${players.length ? players.map((player) => `<form class="player-admin-row" data-player-form="${escapeHtml(player.id)}"><span><strong>${escapeHtml(player.name)}</strong><small>${new Date(player.updatedAt).toLocaleString()}</small></span><input type="number" value="${player.score}" data-player-score aria-label="${escapeHtml(player.name)}的积分" /><button type="submit">修改</button><button type="button" class="danger-quiet" data-reset-player="${escapeHtml(player.id)}">重置</button></form>`).join("") : '<p class="admin-empty">暂无真实玩家记录。</p>'}</div></section>`;
 }
 
 function renderAdminLayer() {
@@ -341,7 +347,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.3</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.4</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
@@ -384,6 +390,9 @@ function bindAdminEvents() {
   app.querySelectorAll("[data-replay-id]").forEach((button) => button.addEventListener("click", () => send({ type: "adminGetReplay", replayId: button.dataset.replayId })));
   app.querySelector("[data-close-replay]")?.addEventListener("click", () => { adminReplay = null; render(); });
   app.querySelector("[data-replay-frame]")?.addEventListener("input", (event) => { replayFrameIndex = Number(event.target.value); render(); });
+  app.querySelector("[data-replay-previous]")?.addEventListener("click", () => { replayFrameIndex = Math.max(0, replayFrameIndex - 1); render(); });
+  app.querySelector("[data-replay-next]")?.addEventListener("click", () => { replayFrameIndex = Math.min(adminReplay.frames.length - 1, replayFrameIndex + 1); render(); });
+  app.querySelector("[data-player-scores-enabled]")?.addEventListener("change", (event) => send({ type: "adminUpdatePlayerScores", enabled: event.target.checked }));
   app.querySelectorAll("[data-player-form]").forEach((form) => form.addEventListener("submit", (event) => {
     event.preventDefault();
     send({ type: "adminUpdatePlayer", playerId: form.dataset.playerForm, score: Number(form.querySelector("[data-player-score]").value) });

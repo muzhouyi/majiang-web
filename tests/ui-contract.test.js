@@ -104,6 +104,20 @@ test("管理面板包含积分、回放和真实玩家积分设置", () => {
   assert.match(serverSource, /adminUpdatePlayer/);
 });
 
+test("管理者回放展示完整牌面并支持逐步前后切换", () => {
+  assert.match(appSource, /class="replay-hand"/);
+  assert.match(appSource, /renderMeld\(\{ \.\.\.meld, hidden: false \}\)/);
+  assert.match(appSource, /data-replay-previous/);
+  assert.match(appSource, /data-replay-next/);
+  assert.match(appSource, /replayFrameIndex = 0/);
+});
+
+test("玩家积分累计可由管理者独立关闭", () => {
+  assert.match(appSource, /data-player-scores-enabled/);
+  assert.match(serverSource, /adminUpdatePlayerScores/);
+  assert.match(serverSource, /if \(!adminData\.playerScores\.enabled\) return/);
+});
+
 test("明杠暗杠使用四张并进入现有明示牌架", () => {
   assert.match(appSource, /data-action="kong"/);
   assert.match(appSource, /data-concealed-kong/);

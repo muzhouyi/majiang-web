@@ -48,6 +48,7 @@ const defaultAdminData = {
     actions: { "明杠": 0, "暗杠": 0 }
   },
   replay: { enabled: true },
+  playerScores: { enabled: true },
   players: {},
   replays: []
 };
@@ -69,6 +70,7 @@ function loadAdminData() {
         actions: { ...defaultAdminData.scoring.actions, ...(saved.scoring?.actions || {}) }
       },
       replay: { ...defaultAdminData.replay, ...(saved.replay || {}) },
+      playerScores: { ...defaultAdminData.playerScores, ...(saved.playerScores || {}) },
       players: saved.players || {},
       replays: Array.isArray(saved.replays) ? saved.replays : []
     };
@@ -1004,6 +1006,7 @@ function finalizeReplay(room) {
 }
 
 function persistHumanScores(room) {
+  if (!adminData.playerScores.enabled) return;
   let changed = false;
   for (const player of room.seats) {
     if (!player || player.isBot || !player.profileId) continue;
@@ -1021,6 +1024,7 @@ function publicAdminData() {
   return {
     scoring: clone(adminData.scoring),
     replay: clone(adminData.replay),
+    playerScores: clone(adminData.playerScores),
     players: Object.entries(adminData.players).map(([id, player]) => ({ id, ...player })),
     replays: adminData.replays.map(({ frames, ...replay }) => ({ ...replay, frameCount: frames.length }))
   };
@@ -1173,6 +1177,10 @@ function handleAdminMessage(client, data) {
     adminData.replay.enabled = Boolean(data.enabled);
     saveAdminData();
     sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "回放设置已保存。" });
+  } else if (data.type === "adminUpdatePlayerScores") {
+    adminData.playerScores.enabled = Boolean(data.enabled);
+    saveAdminData();
+    sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "玩家积分记录设置已保存。" });
   } else if (data.type === "adminGetReplay") {
     const replay = adminData.replays.find((entry) => entry.id === data.replayId);
     sendJson(client.socket, replay ? { type: "adminReplay", replay } : { type: "adminError", message: "没有找到这局回放。" });
