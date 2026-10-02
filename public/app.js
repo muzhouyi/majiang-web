@@ -266,7 +266,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v3.9</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v4.0</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -431,7 +431,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.9</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v4.0</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>

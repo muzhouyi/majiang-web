@@ -256,4 +256,7 @@ test("积分使用乘法倍率且管理员出牌提醒可点击关闭", () => {
   assert.match(appSource, /const dismissSuggestion = \(\) => \{[\s\S]*?adminSuggestion = null;[\s\S]*?toast = "";[\s\S]*?render\(\);/);
   assert.match(appSource, /game-toast \$\{adminSuggestion \? "is-dismissible"/);
   assert.match(appSource, /querySelectorAll\("\[data-dismiss-suggestion\]"\)/);
+  assert.match(cssSource, /\.hand-console \.game-toast\.is-dismissible \{ pointer-events: auto; \}/);
+  assert.match(cssSource, /html, body, #app, \.game \{ caret-color: transparent; \}/);
+  assert.match(cssSource, /input, textarea, \[contenteditable="true"\] \{ caret-color: auto; \}/);
 });
