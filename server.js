@@ -1975,7 +1975,7 @@ function roomSnapshot(room, viewerSeat) {
       })()
       : null;
   return {
-    version: "3.8",
+    version: "3.9",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),

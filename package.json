@@ -1,6 +1,6 @@
 {
   "name": "majiang-web",
-  "version": "3.8.0",
+  "version": "3.9.0",
   "private": true,
   "description": "A browser-playable Mahjong game with solo bot play and online rooms.",
   "type": "commonjs",

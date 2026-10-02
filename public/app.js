@@ -266,7 +266,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v3.8</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v3.9</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -343,7 +343,7 @@ function renderGame() {
         <div class="turn-copy"><strong>${handHint()}</strong><span>${self.routeLabel || "尚未明示路线"}</span></div>
         <div class="action-buttons">${renderActions()}</div>
       </div>
-      ${toast ? `<p class="toast game-toast" role="status">${escapeHtml(toast)}</p>` : ""}
+      ${toast ? `<p class="toast game-toast ${adminSuggestion ? "is-dismissible" : ""}" role="status" ${adminSuggestion ? 'data-dismiss-suggestion tabindex="0" aria-label="关闭出牌提醒"' : ""}>${escapeHtml(toast)}</p>` : ""}
       <div class="self-melds">${renderMelds(self.melds)}</div>
       ${renderHand(self)}
       <div class="tile-preview ${selectedTileId ? "is-visible" : ""}" aria-hidden="${!selectedTileId}">${renderSelectedPreview(self)}</div>
@@ -431,7 +431,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.8</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.9</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
@@ -702,19 +702,25 @@ function selectHandTile(button) {
 }
 
 function bindGameEvents() {
+  const dismissSuggestion = () => {
+    adminSuggestion = null;
+    toast = "";
+    render();
+  };
   app.querySelectorAll("[data-hand-tile-id]").forEach((button) => button.addEventListener("click", () => selectHandTile(button)));
   app.querySelectorAll("[data-layout-mode]").forEach((button) => button.addEventListener("click", () => setLayoutMode(button.dataset.layoutMode)));
   app.querySelectorAll("[data-declare-drill]").forEach((button) => button.addEventListener("click", () => send({ type: "declareDrill", key: button.dataset.declareDrill })));
   app.querySelectorAll("[data-declare-pung]").forEach((button) => button.addEventListener("click", () => send({ type: "declarePung", key: button.dataset.declarePung })));
   app.querySelectorAll("[data-concealed-kong]").forEach((button) => button.addEventListener("click", () => send({ type: "concealedKong", key: button.dataset.concealedKong })));
   app.querySelectorAll("[data-supplemental-kong]").forEach((button) => button.addEventListener("click", () => send({ type: "supplementalKong", key: button.dataset.supplementalKong })));
-  app.querySelector("[data-dismiss-suggestion]")?.addEventListener("click", () => { adminSuggestion = null; render(); });
-  app.querySelector("[data-dismiss-suggestion]")?.addEventListener("keydown", (event) => {
-    if (event.key === "Enter" || event.key === " ") {
-      event.preventDefault();
-      adminSuggestion = null;
-      render();
-    }
+  app.querySelectorAll("[data-dismiss-suggestion]").forEach((element) => {
+    element.addEventListener("click", dismissSuggestion);
+    element.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" || event.key === " ") {
+        event.preventDefault();
+        dismissSuggestion();
+      }
+    });
   });
   app.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", async () => {

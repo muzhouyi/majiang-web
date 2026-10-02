@@ -253,5 +253,7 @@ test("积分使用乘法倍率且管理员出牌提醒可点击关闭", () => {
   assert.match(serverSource, /const appliedPatterns = scoredPatterns\.length \? scoredPatterns : \["普通胡"\]/);
   assert.match(serverSource, /const kong = kongSettlement\(room\)/);
   assert.match(appSource, /data-dismiss-suggestion/);
-  assert.match(appSource, /adminSuggestion = null; render\(\);/);
+  assert.match(appSource, /const dismissSuggestion = \(\) => \{[\s\S]*?adminSuggestion = null;[\s\S]*?toast = "";[\s\S]*?render\(\);/);
+  assert.match(appSource, /game-toast \$\{adminSuggestion \? "is-dismissible"/);
+  assert.match(appSource, /querySelectorAll\("\[data-dismiss-suggestion\]"\)/);
 });
