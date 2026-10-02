@@ -222,3 +222,23 @@ test("最佳出牌建议按当前规则保留直接胡牌进张", () => {
   assert.ok(suggestion.winningCopies > 0);
   assert.ok(suggestion.effectiveTiles.includes("s6") || suggestion.effectiveTiles.includes("s9"));
 });
+
+test("最佳出牌建议不会为了局部搭子拆掉七对骨架", () => {
+  const player = playerWith(["m1", "m1", "m2", "m2", "p3", "p3", "p4", "p4", "s5", "s5", "E", "E", "F", "C"]);
+  player.handTileIds = player.hand.map((_, index) => `pair-${index}`);
+  const room = { phase: "discard", currentSeat: 0, seats: [player, playerWith([]), playerWith([]), playerWith([])] };
+  for (const seat of room.seats) { seat.discards ||= []; seat.melds ||= []; }
+  const suggestion = recommendDiscard(room, 0);
+  assert.equal(player.hand.filter((tile) => tile === suggestion.tile).length, 1);
+  assert.equal(suggestion.shape, "七对");
+});
+
+test("最佳出牌建议识别十三幺并优先打出无关数牌", () => {
+  const player = playerWith(["m1", "m9", "p1", "p9", "s1", "s9", "E", "S", "W", "N", "C", "F", "P", "m5"]);
+  player.handTileIds = player.hand.map((_, index) => `orphan-${index}`);
+  const room = { phase: "discard", currentSeat: 0, seats: [player, playerWith([]), playerWith([]), playerWith([])] };
+  for (const seat of room.seats) { seat.discards ||= []; seat.melds ||= []; }
+  const suggestion = recommendDiscard(room, 0);
+  assert.equal(suggestion.tile, "m5");
+  assert.equal(suggestion.shape, "十三幺");
+});

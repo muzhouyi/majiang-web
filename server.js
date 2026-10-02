@@ -1212,6 +1212,181 @@ function handStructureScore(player, hand) {
   return score;
 }
 
+function standardShanten(hand, exposedMelds = 0) {
+  const counts = tileCounts(hand);
+  let minimum = 8;
+
+  function search(start, melds, pairs, partials) {
+    while (start < counts.length && counts[start] === 0) start += 1;
+    if (start >= counts.length) {
+      const usablePartials = Math.min(partials, Math.max(0, 4 - melds));
+      minimum = Math.min(minimum, 8 - melds * 2 - usablePartials - pairs);
+      return;
+    }
+    if (melds > 4 || pairs > 1) return;
+
+    const tile = tileTypes[start];
+    const suit = tile[0];
+    const number = Number(tile[1]);
+
+    if (counts[start] >= 3) {
+      counts[start] -= 3;
+      search(start, melds + 1, pairs, partials);
+      counts[start] += 3;
+    }
+    if (["m", "p", "s"].includes(suit) && number <= 7) {
+      const second = tileIndex.get(`${suit}${number + 1}`);
+      const third = tileIndex.get(`${suit}${number + 2}`);
+      if (counts[second] && counts[third]) {
+        counts[start] -= 1;
+        counts[second] -= 1;
+        counts[third] -= 1;
+        search(start, melds + 1, pairs, partials);
+        counts[start] += 1;
+        counts[second] += 1;
+        counts[third] += 1;
+      }
+    }
+    if (counts[start] >= 2) {
+      counts[start] -= 2;
+      if (!pairs) search(start, melds, 1, partials);
+      search(start, melds, pairs, partials + 1);
+      counts[start] += 2;
+    }
+    if (["m", "p", "s"].includes(suit)) {
+      for (const offset of [1, 2]) {
+        if (number + offset > 9) continue;
+        const neighbor = tileIndex.get(`${suit}${number + offset}`);
+        if (!counts[neighbor]) continue;
+        counts[start] -= 1;
+        counts[neighbor] -= 1;
+        search(start, melds, pairs, partials + 1);
+        counts[start] += 1;
+        counts[neighbor] += 1;
+      }
+    }
+    counts[start] -= 1;
+    search(start, melds, pairs, partials);
+    counts[start] += 1;
+  }
+
+  search(0, exposedMelds, 0, 0);
+  return minimum;
+}
+
+function sevenPairsShanten(hand) {
+  const counts = tileCounts(hand);
+  const pairs = counts.filter((count) => count >= 2).length;
+  const unique = counts.filter(Boolean).length;
+  return 6 - pairs + Math.max(0, 7 - unique);
+}
+
+function thirteenOrphansShanten(hand) {
+  const required = ["m1", "m9", "p1", "p9", "s1", "s9", "E", "S", "W", "N", "C", "F", "P"];
+  const counts = new Map(required.map((tile) => [tile, countTile(hand, tile)]));
+  const unique = required.filter((tile) => counts.get(tile) > 0).length;
+  const pair = required.some((tile) => counts.get(tile) > 1) ? 1 : 0;
+  return 13 - unique - pair;
+}
+
+const spacedSuitSubsets = (() => {
+  const subsets = [];
+  for (let mask = 0; mask < 2 ** 9; mask += 1) {
+    const numbers = [];
+    for (let index = 0; index < 9; index += 1) {
+      if (mask & (1 << index)) numbers.push(index + 1);
+    }
+    if (numbers.every((number, index) => index === 0 || number - numbers[index - 1] >= 3)) subsets.push(numbers);
+  }
+  return subsets;
+})();
+
+const thirteenBuKaoTargets = (() => {
+  const targets = [];
+  for (const man of spacedSuitSubsets) {
+    for (const pin of spacedSuitSubsets) {
+      for (const sou of spacedSuitSubsets) {
+        const suitedCount = man.length + pin.length + sou.length;
+        if (suitedCount >= 7 && suitedCount <= 9) {
+          const mask = (numbers) => numbers.reduce((value, number) => value | (1 << (number - 1)), 0);
+          targets.push({ manMask: mask(man), pinMask: mask(pin), souMask: mask(sou), honorSlots: 14 - suitedCount });
+        }
+      }
+    }
+  }
+  return targets;
+})();
+
+function thirteenBuKaoShanten(hand) {
+  const uniqueHand = new Set(hand);
+  const honorMatches = ["E", "S", "W", "N", "C", "F", "P"].filter((tile) => uniqueHand.has(tile)).length;
+  const suitMask = (suit) => [...uniqueHand]
+    .filter((tile) => tile[0] === suit)
+    .reduce((value, tile) => value | (1 << (Number(tile[1]) - 1)), 0);
+  const masks = { m: suitMask("m"), p: suitMask("p"), s: suitMask("s") };
+  const bitCount = (value) => {
+    let count = 0;
+    for (let bits = value; bits; bits &= bits - 1) count += 1;
+    return count;
+  };
+  let bestOverlap = 0;
+  for (const target of thirteenBuKaoTargets) {
+    const overlap = bitCount(masks.m & target.manMask)
+      + bitCount(masks.p & target.pinMask)
+      + bitCount(masks.s & target.souMask)
+      + Math.min(honorMatches, target.honorSlots);
+    bestOverlap = Math.max(bestOverlap, overlap);
+  }
+  return 13 - bestOverlap;
+}
+
+function handDistance(player, hand) {
+  const melds = player.melds || [];
+  if (evaluateWin(player, hand).valid) return { shanten: -1, shape: player.route === "drill" ? "钻胡" : player.route === "pung" ? "三碰/四碰" : "成胡" };
+  const standard = standardShanten(hand, melds.length);
+  if (player.route === "drill") {
+    const drillsNeeded = Math.max(0, 3 - melds.filter((meld) => meld.type === "drill").length);
+    return { shanten: standard + drillsNeeded, shape: "钻胡" };
+  }
+  if (player.route === "pung") {
+    const tripletTypes = new Set(["pong", "concealed-pong", "exposed-kong", "concealed-kong"]);
+    const fixedTriplets = melds.filter((meld) => tripletTypes.has(meld.type)).length;
+    const handTriplets = tileCounts(hand).filter((count) => count >= 3).length;
+    const tripletsNeeded = Math.max(0, 3 - fixedTriplets - handTriplets);
+    return { shanten: standard + tripletsNeeded, shape: "三碰/四碰" };
+  }
+  if (melds.length) return { shanten: standard, shape: "普通胡" };
+  const options = [
+    { shanten: standard, shape: "普通胡" },
+    { shanten: sevenPairsShanten(hand), shape: "七对" },
+    { shanten: thirteenOrphansShanten(hand), shape: "十三幺" },
+    { shanten: thirteenBuKaoShanten(hand), shape: "十三不靠" }
+  ];
+  return options.sort((a, b) => a.shanten - b.shanten)[0];
+}
+
+function distanceForShape(player, hand, shape) {
+  if (evaluateWin(player, hand).valid) return -1;
+  if (shape === "七对") return sevenPairsShanten(hand);
+  if (shape === "十三幺") return thirteenOrphansShanten(hand);
+  if (shape === "十三不靠") return thirteenBuKaoShanten(hand);
+  const melds = player.melds || [];
+  const standard = standardShanten(hand, melds.length);
+  if (shape === "钻胡") return standard + Math.max(0, 3 - melds.filter((meld) => meld.type === "drill").length);
+  if (shape === "三碰/四碰") {
+    const tripletTypes = new Set(["pong", "concealed-pong", "exposed-kong", "concealed-kong"]);
+    const triplets = melds.filter((meld) => tripletTypes.has(meld.type)).length
+      + tileCounts(hand).filter((count) => count >= 3).length;
+    return standard + Math.max(0, 3 - triplets);
+  }
+  return standard;
+}
+
+function distanceAfterDraw(player, hand, draw, shape) {
+  const drawn = [...hand, draw];
+  return { shanten: distanceForShape(player, drawn, shape), shape };
+}
+
 function visibleTileCount(room, viewerSeat, tile) {
   let count = room.seats[viewerSeat].hand.filter((entry) => entry === tile).length;
   for (const player of room.seats) {
@@ -1231,30 +1406,36 @@ function recommendDiscard(room, seat) {
   const ranked = candidates.map((discard) => {
     const hand = [...player.hand];
     hand.splice(hand.indexOf(discard), 1);
-    const baseScore = handStructureScore(player, hand);
-    let winningCopies = 0;
-    let effectiveCopies = 0;
-    const effectiveTiles = [];
+    const distance = handDistance(player, hand);
+    const patternTieBreak = handStructureScore(player, hand);
+    const allTiles = playerTiles(player, hand);
+    const patternBonus = (isPureOneSuit(allTiles) ? 5 : 0) + (hasOneDragon(allTiles) ? 4 : 0);
+    return { discard, hand, distance, winningCopies: 0, effectiveCopies: 0, effectiveTiles: [], patternTieBreak, patternBonus };
+  });
+  const bestShanten = Math.min(...ranked.map((entry) => entry.distance.shanten));
+  for (const entry of ranked) {
+    if (entry.distance.shanten !== bestShanten) continue;
     for (const draw of tileTypes) {
       const copies = Math.max(0, 4 - visibleTileCount(room, seat, draw));
       if (!copies) continue;
-      const nextHand = [...hand, draw];
-      if (evaluateWin(player, nextHand).valid) {
-        winningCopies += copies;
-        effectiveCopies += copies;
-        effectiveTiles.push(draw);
-      } else if (handStructureScore(player, nextHand) > baseScore + 2) {
-        effectiveCopies += copies;
-        effectiveTiles.push(draw);
+      const nextDistance = distanceAfterDraw(player, entry.hand, draw, entry.distance.shape);
+      if (nextDistance.shanten === -1) {
+        entry.winningCopies += copies;
+        entry.effectiveCopies += copies;
+        entry.effectiveTiles.push(draw);
+      } else if (nextDistance.shanten < entry.distance.shanten) {
+        entry.effectiveCopies += copies;
+        entry.effectiveTiles.push(draw);
       }
     }
-    const routeBonus = player.route === "pung"
-      ? Math.max(0, 2 - countTile(hand, discard)) * 2
-      : player.route === "drill" ? 0 : 1;
-    return { discard, baseScore, winningCopies, effectiveCopies, effectiveTiles, score: winningCopies * 10000 + effectiveCopies * 100 + baseScore + routeBonus };
-  }).sort((a, b) => b.score - a.score || tileIndex.get(b.discard) - tileIndex.get(a.discard));
+  }
+  ranked.sort((a, b) => a.distance.shanten - b.distance.shanten
+    || b.winningCopies - a.winningCopies
+    || b.effectiveCopies - a.effectiveCopies
+    || b.patternBonus - a.patternBonus
+    || b.patternTieBreak - a.patternTieBreak
+    || tileIndex.get(b.discard) - tileIndex.get(a.discard));
   const best = ranked[0];
-  const routeText = player.route === "drill" ? "按钻胡路线" : player.route === "pung" ? "按三碰/四碰路线" : "综合现有胡法";
   const draws = best.effectiveTiles.slice(0, 6).map(tileName).join("、");
   return {
     tile: best.discard,
@@ -1262,9 +1443,11 @@ function recommendDiscard(room, seat) {
     winningCopies: best.winningCopies,
     effectiveCopies: best.effectiveCopies,
     effectiveTiles: best.effectiveTiles,
+    shanten: best.distance.shanten,
+    shape: best.distance.shape,
     text: best.winningCopies
-      ? `建议打出${tileName(best.discard)}。${routeText}，当前可形成约${best.winningCopies}张直接胡牌进张${draws ? `（${draws}）` : ""}。`
-      : `建议打出${tileName(best.discard)}。${routeText}，预计保留约${best.effectiveCopies}张有效进张${draws ? `（${draws}）` : ""}。`
+      ? `建议打出${tileName(best.discard)}。按${best.distance.shape}分析，当前有${best.winningCopies}张可见余量的直接胡牌进张${draws ? `（${draws}）` : ""}。`
+      : `建议打出${tileName(best.discard)}。按${best.distance.shape}分析，当前为${best.distance.shanten}向听，保留${best.effectiveCopies}张可见余量的有效进张${draws ? `（${draws}）` : ""}。`
   };
 }
 
@@ -1643,7 +1826,7 @@ function roomSnapshot(room, viewerSeat) {
       })()
       : null;
   return {
-    version: "3.4",
+    version: "3.5",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
