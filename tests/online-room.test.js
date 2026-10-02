@@ -85,7 +85,9 @@ test("大厅、房主踢人、托管重连和全员重开可以连贯完成", as
   assert.equal(started.state.currentSeat, started.state.dealerSeat);
 
   guest.close();
-  await host.waitFor((payload) => payload.type === "state" && payload.state.players[guestSeat]?.delegated === true);
+  const disconnected = await host.waitFor((payload) => payload.type === "state" && payload.state.players[guestSeat]?.connected === false);
+  assert.equal(disconnected.state.players[guestSeat].delegated, false);
+  assert.equal(disconnected.state.players[guestSeat].isBot, false);
 
   const returningGuest = websocketClient(`ws://127.0.0.1:${port}`);
   await returningGuest.opened;

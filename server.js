@@ -51,6 +51,7 @@ const defaultAdminData = {
     actions: { "明杠": 0, "暗杠": 0 }
   },
   replay: { enabled: true },
+  gameplay: { botTakeoverOnDisconnect: false },
   playerScores: { enabled: true, history: [] },
   players: {},
   replays: []
@@ -73,6 +74,7 @@ function loadAdminData() {
         actions: { ...defaultAdminData.scoring.actions, ...(saved.scoring?.actions || {}) }
       },
       replay: { ...defaultAdminData.replay, ...(saved.replay || {}) },
+      gameplay: { ...defaultAdminData.gameplay, ...(saved.gameplay || {}) },
       playerScores: {
         ...defaultAdminData.playerScores,
         ...(saved.playerScores || {}),
@@ -658,7 +660,7 @@ function sitClient(room, client, preferredSeat = -1) {
 
 function delegatedSeatForProfile(room, profileId) {
   if (!profileId) return -1;
-  return room.seats.findIndex((seat) => seat?.delegated && seat.profileId === profileId);
+  return room.seats.findIndex((seat) => seat?.profileId === profileId && (seat.delegated || !seat.connected));
 }
 
 function reconnectClient(room, client) {
@@ -678,7 +680,7 @@ function reconnectClient(room, client) {
   addLog(room, `${player.name} 重新加入并接管了${windName(seatIndex)}位。`);
   markRoomActivity(room);
   broadcastRoom(room);
-  if (room.phase === "claim") scheduleBotClaim(room);
+  resumeRoomFlow(room);
   return true;
 }
 
@@ -702,7 +704,7 @@ function roomDirectory(profileId) {
         canRejoin,
         players: room.seats.filter(Boolean).map((seat) => seat.isBot
           ? `${seat.name}${seat.delegated ? "（托管）" : "（人机）"}`
-          : seat.name)
+          : `${seat.name}${seat.connected ? "" : "（掉线）"}`)
       };
     })
     .sort((a, b) => Number(b.canRejoin) - Number(a.canRejoin) || Number(b.canJoin) - Number(a.canJoin) || a.id.localeCompare(b.id));
@@ -1181,6 +1183,91 @@ function chooseBotDiscard(player) {
   return scored[0]?.tile || player.hand[0];
 }
 
+function handStructureScore(player, hand) {
+  const counts = tileCounts(hand);
+  let score = 0;
+  for (let index = 0; index < counts.length; index += 1) {
+    const count = counts[index];
+    if (count >= 2) score += player.route === "pung" ? 10 : 7;
+    if (count >= 3) score += player.route === "pung" ? 24 : 17;
+    const tile = tileTypes[index];
+    if (!["m", "p", "s"].includes(tile[0])) continue;
+    const number = Number(tile[1]);
+    if (number <= 8 && counts[tileIndex.get(`${tile[0]}${number + 1}`)] > 0) score += 5;
+    if (number <= 7 && counts[tileIndex.get(`${tile[0]}${number + 2}`)] > 0) score += 3;
+  }
+  if (!player.route) {
+    const pairCount = counts.filter((count) => count >= 2).length;
+    score += pairCount * 5;
+    const orphanTiles = new Set(["m1", "m9", "p1", "p9", "s1", "s9", "E", "S", "W", "N", "C", "F", "P"]);
+    score += new Set(hand.filter((tile) => orphanTiles.has(tile))).size * 2;
+    for (const suit of ["m", "p", "s"]) {
+      const suited = hand.filter((tile) => tile[0] === suit);
+      score += new Set(suited.map((tile) => tile[1])).size;
+      score += suited.length * 0.6;
+    }
+    const suitCounts = ["m", "p", "s"].map((suit) => hand.filter((tile) => tile[0] === suit).length);
+    score += Math.max(...suitCounts) * 0.8;
+  }
+  return score;
+}
+
+function visibleTileCount(room, viewerSeat, tile) {
+  let count = room.seats[viewerSeat].hand.filter((entry) => entry === tile).length;
+  for (const player of room.seats) {
+    count += player.discards.filter((entry) => entry.tile === tile).length;
+    for (const meld of player.melds) {
+      if (["drill", "concealed-pong", "concealed-kong"].includes(meld.type) && player !== room.seats[viewerSeat]) continue;
+      count += meld.tiles.filter((entry) => entry === tile).length;
+    }
+  }
+  return Math.min(4, count);
+}
+
+function recommendDiscard(room, seat) {
+  const player = room.seats[seat];
+  if (!player || room.phase !== "discard" || room.currentSeat !== seat || player.hand.length < 2) return null;
+  const candidates = [...new Set(player.hand)];
+  const ranked = candidates.map((discard) => {
+    const hand = [...player.hand];
+    hand.splice(hand.indexOf(discard), 1);
+    const baseScore = handStructureScore(player, hand);
+    let winningCopies = 0;
+    let effectiveCopies = 0;
+    const effectiveTiles = [];
+    for (const draw of tileTypes) {
+      const copies = Math.max(0, 4 - visibleTileCount(room, seat, draw));
+      if (!copies) continue;
+      const nextHand = [...hand, draw];
+      if (evaluateWin(player, nextHand).valid) {
+        winningCopies += copies;
+        effectiveCopies += copies;
+        effectiveTiles.push(draw);
+      } else if (handStructureScore(player, nextHand) > baseScore + 2) {
+        effectiveCopies += copies;
+        effectiveTiles.push(draw);
+      }
+    }
+    const routeBonus = player.route === "pung"
+      ? Math.max(0, 2 - countTile(hand, discard)) * 2
+      : player.route === "drill" ? 0 : 1;
+    return { discard, baseScore, winningCopies, effectiveCopies, effectiveTiles, score: winningCopies * 10000 + effectiveCopies * 100 + baseScore + routeBonus };
+  }).sort((a, b) => b.score - a.score || tileIndex.get(b.discard) - tileIndex.get(a.discard));
+  const best = ranked[0];
+  const routeText = player.route === "drill" ? "按钻胡路线" : player.route === "pung" ? "按三碰/四碰路线" : "综合现有胡法";
+  const draws = best.effectiveTiles.slice(0, 6).map(tileName).join("、");
+  return {
+    tile: best.discard,
+    tileName: tileName(best.discard),
+    winningCopies: best.winningCopies,
+    effectiveCopies: best.effectiveCopies,
+    effectiveTiles: best.effectiveTiles,
+    text: best.winningCopies
+      ? `建议打出${tileName(best.discard)}。${routeText}，当前可形成约${best.winningCopies}张直接胡牌进张${draws ? `（${draws}）` : ""}。`
+      : `建议打出${tileName(best.discard)}。${routeText}，预计保留约${best.effectiveCopies}张有效进张${draws ? `（${draws}）` : ""}。`
+  };
+}
+
 function addLog(room, text) {
   room.logSequence = (room.logSequence || 0) + 1;
   room.log.unshift({ step: room.logSequence, time: Date.now(), text });
@@ -1259,6 +1346,7 @@ function publicAdminData() {
   return {
     scoring: clone(adminData.scoring),
     replay: clone(adminData.replay),
+    gameplay: clone(adminData.gameplay),
     playerScores: clone(adminData.playerScores),
     players: Object.entries(adminData.players).map(([id, player]) => ({ id, ...player })),
     replays: adminData.replays.map(({ frames, ...replay }) => ({ ...replay, frameCount: frames.length }))
@@ -1280,7 +1368,7 @@ function clearRoomCleanupTimer(room) {
 }
 
 function connectedHumanCount(room) {
-  return room.seats.filter((seat) => seat && !seat.isBot).length;
+  return room.seats.filter((seat) => seat && !seat.isBot && seat.connected).length;
 }
 
 function roomCleanupDeadline(room, now = Date.now()) {
@@ -1477,6 +1565,23 @@ function delegateSeat(room, seatIndex, reason = "离开") {
   }
 }
 
+function disconnectSeat(room, seatIndex, reason = "掉线") {
+  const player = room.seats[seatIndex];
+  if (!player || player.isBot) return;
+  if (adminData.gameplay.botTakeoverOnDisconnect) {
+    delegateSeat(room, seatIndex, reason);
+    return;
+  }
+  if ((room.phase === "discard" && room.currentSeat === seatIndex)
+    || (room.phase === "claim" && room.pendingClaim?.responders.includes(seatIndex))) clearRoomTimer(room);
+  player.connected = false;
+  player.delegated = false;
+  room.emptySince = connectedHumanCount(room) === 0 ? (room.emptySince || Date.now()) : null;
+  scheduleRoomCleanup(room);
+  addLog(room, `${player.name} ${reason}，不会由电脑接管；轮到该玩家时将等待本人重新加入。`);
+  broadcastRoom(room);
+}
+
 function leaveRoom(client) {
   const room = rooms.get(client.roomId);
   if (!room || client.seat < 0) return;
@@ -1484,7 +1589,7 @@ function leaveRoom(client) {
   client.roomId = null;
   client.seat = -1;
   if (room.phase === "waiting") removeWaitingSeat(room, seatIndex);
-  else delegateSeat(room, seatIndex);
+  else disconnectSeat(room, seatIndex, "离开");
   sendJson(client.socket, { type: "left" });
 }
 
@@ -1529,8 +1634,16 @@ function roomSnapshot(room, viewerSeat) {
   const isResponder = Boolean(claim && claim.responders.includes(viewerSeat) && !claim.passed.includes(viewerSeat));
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   const viewerIsHost = viewer?.profileId === room.hostProfileId;
+  const waitingForReconnect = room.phase === "discard" && !room.seats[room.currentSeat]?.connected
+    ? { seats: [room.currentSeat], names: [room.seats[room.currentSeat].name] }
+    : room.phase === "claim"
+      ? (() => {
+        const seats = claim.responders.filter((seat) => !claim.passed.includes(seat) && !room.seats[seat]?.connected);
+        return seats.length ? { seats, names: seats.map((seat) => room.seats[seat].name) } : null;
+      })()
+      : null;
   return {
-    version: "3.3",
+    version: "3.4",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -1540,6 +1653,7 @@ function roomSnapshot(room, viewerSeat) {
     phase: room.phase,
     claimStage: claim?.stage || null,
     currentSeat: room.currentSeat,
+    waitingForReconnect,
     dealerSeat: room.dealerSeat,
     diceRounds: clone(room.diceRounds || []),
     wallCount: room.wall.length,
@@ -1647,6 +1761,16 @@ function handleAdminMessage(client, data) {
     adminData.replay.enabled = Boolean(data.enabled);
     saveAdminData();
     sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "回放设置已保存。" });
+  } else if (data.type === "adminUpdateGameplay") {
+    adminData.gameplay.botTakeoverOnDisconnect = Boolean(data.botTakeoverOnDisconnect);
+    saveAdminData();
+    sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "掉线接管设置已保存。" });
+  } else if (data.type === "adminSuggestDiscard") {
+    const room = rooms.get(client.roomId);
+    const suggestion = room ? recommendDiscard(room, client.seat) : null;
+    sendJson(client.socket, suggestion
+      ? { type: "adminSuggestion", suggestion }
+      : { type: "adminError", message: "当前不是你的出牌回合，暂时无法分析。" });
   } else if (data.type === "adminUpdatePlayerScores") {
     adminData.playerScores.enabled = Boolean(data.enabled);
     saveAdminData();
@@ -1995,7 +2119,7 @@ server.on("upgrade", (req, socket) => {
     const seat = room.seats[client.seat];
     if (seat && !seat.isBot) {
       if (room.phase === "waiting") removeWaitingSeat(room, client.seat, `${seat.name} 断开连接并让出了座位。`);
-      else delegateSeat(room, client.seat, "断开连接");
+      else disconnectSeat(room, client.seat, "断开连接");
     }
   });
 });
@@ -2025,6 +2149,7 @@ module.exports = {
   drillCompletionOptions,
   concealedKongOptions,
   rollForDealer,
+  recommendDiscard,
   makePlayer,
   delegatedSeatForProfile,
   roomDirectory,

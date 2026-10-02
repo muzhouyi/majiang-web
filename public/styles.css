@@ -400,6 +400,10 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 .restart-status { display: grid; gap: 3px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: rgba(216,169,60,.08); }
 .restart-status strong { color: #efd178; font-size: 11px; }
 .restart-status span { color: var(--muted); font-size: 9px; }
+.suggestion-button { border-color: #5fae91; color: #9fe1c8; }
+.suggestion-panel { display: grid; gap: 4px; padding: 10px 12px; border-bottom: 1px solid var(--line); background: rgba(69,151,121,.1); }
+.suggestion-panel strong { color: #9fe1c8; font-size: 12px; }
+.suggestion-panel span { color: #d4e4dd; font-size: 10px; line-height: 1.45; }
 .room-panel { display: flex; align-items: center; gap: 7px; }
 .room-panel > div { display: grid; margin-right: auto; }
 .room-panel small, .score-line small { color: var(--muted); font-size: 10px; }

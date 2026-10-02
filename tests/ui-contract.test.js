@@ -225,3 +225,12 @@ test("牌局面板提供全员同意悔棋且人机默认同意", () => {
   assert.match(serverSource, /seat && !seat\.isBot/);
   assert.match(serverSource, /restoreUndoCheckpoint/);
 });
+
+test("管理员可控制掉线托管并在自己的回合请求出牌建议", () => {
+  assert.match(appSource, /data-bot-takeover/);
+  assert.match(appSource, /adminUpdateGameplay/);
+  assert.match(appSource, /adminUnlocked && state\.canDiscard/);
+  assert.match(appSource, /adminSuggestDiscard/);
+  assert.match(serverSource, /botTakeoverOnDisconnect: false/);
+  assert.match(serverSource, /function recommendDiscard/);
+});

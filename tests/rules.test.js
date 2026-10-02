@@ -14,6 +14,7 @@ const {
   drillCompletionOptions,
   concealedKongOptions,
   rollForDealer,
+  recommendDiscard,
   makePlayer,
   makeDeck,
   sortedPhysicalHand,
@@ -197,4 +198,27 @@ test("开局掷骰每人使用两枚骰子，同点时只让最高点玩家继�
       if (index > 0) assert.deepEqual(rounds[index].rolls.map((roll) => roll.seat), rounds[index - 1].winners);
     }
   }
+});
+
+test("最佳出牌建议按当前规则保留直接胡牌进张", () => {
+  const player = playerWith(["m1", "m2", "m3", "m4", "m5", "m6", "p2", "p3", "p4", "s7", "s8", "E", "E", "C"]);
+  player.handTileIds = player.hand.map((_, index) => `tile-${index}`);
+  const room = {
+    phase: "discard",
+    currentSeat: 0,
+    seats: [
+      player,
+      playerWith([]),
+      playerWith([]),
+      playerWith([])
+    ]
+  };
+  for (const seat of room.seats) {
+    seat.discards ||= [];
+    seat.melds ||= [];
+  }
+  const suggestion = recommendDiscard(room, 0);
+  assert.equal(suggestion.tile, "C");
+  assert.ok(suggestion.winningCopies > 0);
+  assert.ok(suggestion.effectiveTiles.includes("s6") || suggestion.effectiveTiles.includes("s9"));
 });
