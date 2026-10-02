@@ -2,7 +2,7 @@ FROM node:24-alpine
 
 LABEL org.opencontainers.image.title="Dongguang Mahjong"
 LABEL org.opencontainers.image.description="Browser Mahjong game using the confirmed Dongguang rules"
-LABEL org.opencontainers.image.version="4.0"
+LABEL org.opencontainers.image.version="4.3"
 
 WORKDIR /app
 

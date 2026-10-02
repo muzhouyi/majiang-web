@@ -3,7 +3,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: dongguang-mahjong-v40
+    container_name: dongguang-mahjong-v43
     restart: unless-stopped
     init: true
     ports:
@@ -28,4 +28,4 @@ services:
 
 volumes:
   majiang-data:
-    name: "${MAJIANG_DATA_VOLUME:-dongguang-mahjong-v40-data}"
+    name: "${MAJIANG_DATA_VOLUME:-dongguang-mahjong-v43-data}"

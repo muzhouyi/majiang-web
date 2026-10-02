@@ -38,8 +38,8 @@ const defaultPatternPoints = {
   "三碰胡": 4,
   "四碰胡": 8,
   "钻胡": 6,
-  "门清": 0,
-  "缺门": 0,
+  "门清": 1,
+  "缺门": 1,
   "杠上开花": 0
 };
 
@@ -503,6 +503,17 @@ function winnerMultiplier(room, winnerSeat, method) {
     * (method === "自摸" ? (Number(scoring.selfDrawFactor) || 1) : 1);
 }
 
+const additivePatternNames = new Set(["门清", "缺门"]);
+
+function appliedScoringPatterns(patterns, gangShangKaiHua = false) {
+  const scoredPatterns = [...patterns];
+  if (gangShangKaiHua) scoredPatterns.push("杠上开花");
+  const bonusPatterns = scoredPatterns.filter((pattern) => additivePatternNames.has(pattern));
+  const mainPatterns = scoredPatterns.filter((pattern) => !additivePatternNames.has(pattern));
+  if (!mainPatterns.length) mainPatterns.push("普通胡");
+  return { mainPatterns, bonusPatterns, appliedPatterns: [...mainPatterns, ...bonusPatterns] };
+}
+
 function kongSettlement(room) {
   const deltas = [0, 0, 0, 0];
   const earned = [0, 0, 0, 0];
@@ -580,9 +591,10 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
   const evaluation = evaluateWin(winner, winner.hand);
   const scoring = adminData.scoring;
   const items = [];
-  const scoredPatterns = [...evaluation.patterns];
-  if (gangShangKaiHua) scoredPatterns.push("杠上开花");
-  const appliedPatterns = scoredPatterns.length ? scoredPatterns : ["普通胡"];
+  const { mainPatterns, bonusPatterns, appliedPatterns } = appliedScoringPatterns(
+    evaluation.patterns,
+    gangShangKaiHua
+  );
   let handPoints = 0;
   for (const pattern of appliedPatterns) {
     const points = scoring.patterns[pattern] || 0;
@@ -595,7 +607,10 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
 
   const multiplier = winnerMultiplier(room, winnerSeat, method);
   const payment = handPoints * multiplier;
-  items.push({ name: "胡法分小计", points: handPoints });
+  const mainPoints = mainPatterns.reduce((total, pattern) => total + (Number(scoring.patterns[pattern]) || 0), 0);
+  const bonusPoints = bonusPatterns.reduce((total, pattern) => total + (Number(scoring.patterns[pattern]) || 0), 0);
+  items.push({ name: "主体胡法分小计", points: mainPoints });
+  if (bonusPatterns.length) items.push({ name: "门清/缺门附加分", points: bonusPoints });
   items.push({ name: `总倍率（基础${scoring.baseMultiplier}×庄家${winnerSeat === room.dealerSeat ? scoring.dealerMultiplier : 1}×自摸${method === "自摸" ? scoring.selfDrawFactor : 1}）`, points: multiplier });
 
   const deltas = [0, 0, 0, 0];
@@ -637,13 +652,13 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
     fromSeat: method === "点炮" ? fromSeat : null,
     method,
     winningTile,
-    patterns: evaluation.patterns,
+    patterns: appliedPatterns,
     base: Number(scoring.baseMultiplier) || 0,
     multiplier,
     payment,
     deltas,
     items,
-    text: `${winner.name} ${method}胡牌，${evaluation.patterns.join("、") || "普通胡"}`
+    text: `${winner.name} ${method}胡牌，${appliedPatterns.join("、")}`
   };
 }
 
@@ -1505,9 +1520,7 @@ function estimatedSelfDrawGain(room, seat, player, hand, gangShangKaiHua = false
   const evaluation = evaluateWin(player, hand);
   if (!evaluation.valid) return 0;
   const scoring = adminData.scoring;
-  const patterns = [...evaluation.patterns];
-  if (gangShangKaiHua) patterns.push("杠上开花");
-  const appliedPatterns = patterns.length ? patterns : ["普通胡"];
+  const { appliedPatterns } = appliedScoringPatterns(evaluation.patterns, gangShangKaiHua);
   const points = appliedPatterns.reduce((total, pattern) => total + (Number(scoring.patterns[pattern]) || 0), 0);
   return points * winnerMultiplier(room, seat, "自摸") * 3;
 }
@@ -2010,7 +2023,7 @@ function roomSnapshot(room, viewerSeat) {
       })()
       : null;
   return {
-    version: "4.2",
+    version: "4.3",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -2527,6 +2540,7 @@ module.exports = {
   isPureOneSuit,
   hasOneDragon,
   missingSuitCount,
+  appliedScoringPatterns,
   evaluateWin,
   drillCompletionOptions,
   concealedKongOptions,

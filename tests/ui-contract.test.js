@@ -250,7 +250,10 @@ test("补杠、直接杠优先与局末统一结算均由服务端约束", () =>
 
 test("积分使用乘法倍率且管理员出牌提醒可点击关闭", () => {
   assert.match(serverSource, /Number\(scoring\.baseMultiplier\)[\s\S]*?\* \(winnerSeat === room\.dealerSeat/);
-  assert.match(serverSource, /const appliedPatterns = scoredPatterns\.length \? scoredPatterns : \["普通胡"\]/);
+  assert.match(serverSource, /const additivePatternNames = new Set\(\["门清", "缺门"\]\)/);
+  assert.match(serverSource, /if \(!mainPatterns\.length\) mainPatterns\.push\("普通胡"\)/);
+  assert.match(serverSource, /appliedPatterns: \[\.\.\.mainPatterns, \.\.\.bonusPatterns\]/);
+  assert.match(appSource, /主体胡法分.*门清\/缺门附加分/);
   assert.match(serverSource, /const kong = kongSettlement\(room\)/);
   assert.match(appSource, /data-dismiss-suggestion/);
   assert.match(appSource, /const dismissSuggestion = \(\) => \{[\s\S]*?adminSuggestion = null;[\s\S]*?toast = "";[\s\S]*?render\(\);/);

@@ -11,6 +11,7 @@ const {
   isPureOneSuit,
   hasOneDragon,
   missingSuitCount,
+  appliedScoringPatterns,
   evaluateWin,
   drillCompletionOptions,
   concealedKongOptions,
@@ -131,6 +132,29 @@ test("碰、钻、暗杠和自摸暗刻上摞都会破门清", () => {
     assert.equal(result.valid, true);
     assert.equal(result.patterns.includes("门清"), false);
   }
+});
+
+test("门清和缺门作为附加分，不会顶替普通胡或主体胡法", () => {
+  assert.deepEqual(
+    appliedScoringPatterns(["门清"]),
+    { mainPatterns: ["普通胡"], bonusPatterns: ["门清"], appliedPatterns: ["普通胡", "门清"] }
+  );
+  assert.deepEqual(
+    appliedScoringPatterns(["缺门", "缺门", "门清"]),
+    {
+      mainPatterns: ["普通胡"],
+      bonusPatterns: ["缺门", "缺门", "门清"],
+      appliedPatterns: ["普通胡", "缺门", "缺门", "门清"]
+    }
+  );
+  assert.deepEqual(
+    appliedScoringPatterns(["清一色", "一条龙", "门清"]),
+    {
+      mainPatterns: ["清一色", "一条龙"],
+      bonusPatterns: ["门清"],
+      appliedPatterns: ["清一色", "一条龙", "门清"]
+    }
+  );
 });
 
 test("上摞后只按三碰胡或四碰胡路线判定", () => {

@@ -1,15 +1,15 @@
-# 青桌麻将 v4.0：1Panel Docker 部署
+# 青桌麻将 v4.3：1Panel Docker 部署
 
 ## 部署包
 
-使用 `majiang-v4.0-1panel.zip`。压缩包包含 v4.0 源码、本地 SVG 牌面、`Dockerfile`、`docker-compose.yml` 和环境变量示例。
+使用 `majiang-v4.3-1panel.zip`。压缩包包含 v4.3 源码、本地 SVG 牌面、`Dockerfile`、`docker-compose.yml` 和环境变量示例。
 
 Compose 不包含麻将应用的 `image:` 下载地址，会在服务器本地使用当前目录的 Dockerfile 构建应用镜像，不会从 Docker Hub 下载现成的麻将应用镜像。首次构建仍需要获取 Dockerfile 使用的 `node:24-alpine` 基础镜像。
 
 ## 上传与解压
 
-1. 在 1Panel“文件”中创建 `/opt/majiang-v4.0`。
-2. 上传 `majiang-v4.0-1panel.zip` 并解压到该目录。
+1. 在 1Panel“文件”中创建 `/opt/majiang-v4.3`。
+2. 上传 `majiang-v4.3-1panel.zip` 并解压到该目录。
 3. 确认目录中直接包含 `docker-compose.yml`、`Dockerfile`、`server.js`、`package.json` 和 `public`。
 
 ## 环境变量
@@ -20,7 +20,7 @@ Compose 不包含麻将应用的 `image:` 下载地址，会在服务器本地�
 BIND_ADDRESS=127.0.0.1
 MAJIANG_PORT=3019
 ADMIN_PASSWORD=请替换为自己的管理员密码
-MAJIANG_DATA_VOLUME=dongguang-mahjong-v40-data
+MAJIANG_DATA_VOLUME=dongguang-mahjong-v43-data
 ```
 
 - 使用域名和 1Panel 反向代理时，保持 `BIND_ADDRESS=127.0.0.1`。
@@ -29,10 +29,10 @@ MAJIANG_DATA_VOLUME=dongguang-mahjong-v40-data
 
 ## 从旧版升级并保留数据
 
-如果服务器已经有旧版，且需要保留管理员设置、玩家总分、积分明细和回放，请在 v4.0 的 `.env` 中继续使用旧数据卷名。例如沿用 v3.7：
+如果服务器已经有旧版，且需要保留管理员设置、玩家总分、积分明细和回放，请在 v4.3 的 `.env` 中继续使用旧数据卷名。例如沿用 v4.0：
 
 ```env
-MAJIANG_DATA_VOLUME=dongguang-mahjong-v37-data
+MAJIANG_DATA_VOLUME=dongguang-mahjong-v40-data
 ```
 
 如果你之前沿用的是其他旧版数据卷，也可以继续填写原来的数据卷名。
@@ -41,20 +41,20 @@ MAJIANG_DATA_VOLUME=dongguang-mahjong-v37-data
 MAJIANG_DATA_VOLUME=你的旧数据卷名
 ```
 
-不要删除旧数据卷。v4.0 会自动兼容旧管理数据；旧数据没有新增字段时，会在首次运行时自动补齐。
+不要删除旧数据卷。v4.3 会自动兼容旧管理数据；旧数据没有新增字段时，会在首次运行时自动补齐。
 
 ## 在 1Panel 本地构建
 
 1. 打开 1Panel“容器”->“编排”。
-2. 创建编排并选择 `/opt/majiang-v4.0/docker-compose.yml`。
+2. 创建编排并选择 `/opt/majiang-v4.3/docker-compose.yml`。
 3. 选择“构建并启动”或“重新构建镜像”，不要选择仅拉取应用镜像。
 4. Compose 使用 `build.context: .` 和当前目录的 Dockerfile 构建。
-5. 容器 `dongguang-mahjong-v40` 的健康状态稍后应变为正常。
+5. 容器 `dongguang-mahjong-v43` 的健康状态稍后应变为正常。
 
 也可以在服务器终端执行：
 
 ```bash
-cd /opt/majiang-v4.0
+cd /opt/majiang-v4.3
 docker compose up -d --build
 ```
 
