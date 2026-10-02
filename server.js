@@ -222,6 +222,16 @@ function snapshotMeld(meld, isOwner) {
   const concealed = meld.type === "drill" || meld.type === "concealed-pong" || meld.type === "concealed-kong";
   if (isOwner || !concealed) return { ...meld, hidden: false };
   const tileCount = meld.tiles.length;
+  if (meld.type === "drill") {
+    const revealedIndex = Math.max(0, meld.tiles.indexOf(meld.centerTile));
+    return {
+      ...meld,
+      tiles: meld.tiles.map((tile, index) => index === revealedIndex ? tile : null),
+      tileIds: (meld.tileIds || Array(tileCount).fill(null))
+        .map((tileId, index) => index === revealedIndex ? tileId : null),
+      hidden: true
+    };
+  }
   return {
     ...meld,
     tiles: Array(tileCount).fill(null),
@@ -982,13 +992,13 @@ function declareCompletedDrill(room, seat, key, silent = false) {
     kind: option.kind,
     tiles,
     tileIds: removed.map((entry) => entry.tileId),
-    centerTile: tiles[1],
+    centerTile: option.waitingTile,
     stacked: true,
     fromSeat: seat
   });
   player.drawnTile = null;
   player.drawnTileId = null;
-  addLog(room, `${player.name} 明示钻了，将刚摸成的钻/边牌暗置上摞。`);
+  addLog(room, `${player.name} 钻了${tileName(option.waitingTile)}，只亮出钻进来的这张牌。`);
   if (!silent) broadcastRoom(room);
   return true;
 }
@@ -1021,7 +1031,7 @@ function declarePungStack(room, seat, key, silent = false) {
     });
   }
 
-  addLog(room, `${player.name} 明示上摞，走三碰胡/四碰胡路线。`);
+  if (key.startsWith("meld:")) addLog(room, `${player.name} 明示上摞，走三碰胡/四碰胡路线。`);
   if (!silent) broadcastRoom(room);
   return true;
 }
@@ -1975,7 +1985,7 @@ function roomSnapshot(room, viewerSeat) {
       })()
       : null;
   return {
-    version: "4.0",
+    version: "4.1",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -2017,7 +2027,18 @@ function roomSnapshot(room, viewerSeat) {
     supplementalKongOptions: viewerTurn ? supplementalKongOptions(viewer) : [],
     drillOptions: viewerTurn ? drillCompletionOptions(viewer) : [],
     stackOptions: !room.winner && room.phase !== "waiting" ? stackOptions(viewer) : [],
-    players: room.seats.map((seat, index) => seat ? {
+    players: room.seats.map((seat, index) => {
+      if (!seat) return null;
+      const ownerView = index === viewerSeat || room.phase === "ended";
+      const concealedPongCount = seat.melds
+        .filter((meld) => meld.type === "concealed-pong")
+        .reduce((total, meld) => total + meld.tiles.length, 0);
+      const visibleMelds = ownerView
+        ? seat.melds
+        : seat.melds.filter((meld) => meld.type !== "concealed-pong");
+      const hasPublicPungStack = seat.melds.some((meld) => meld.stacked && meld.type !== "concealed-pong");
+      const visibleRoute = ownerView || seat.route !== "pung" || hasPublicPungStack ? seat.route : null;
+      return {
       seat: index,
       wind: windName(index),
       name: seat.name,
@@ -2026,13 +2047,14 @@ function roomSnapshot(room, viewerSeat) {
       connected: seat.connected,
       score: seat.score,
       roundDelta: seat.roundDelta,
-      handCount: seat.hand.length,
+      handCount: seat.hand.length + (ownerView ? 0 : concealedPongCount),
       discards: seat.discards,
-      melds: seat.melds.map((meld) => snapshotMeld(meld, index === viewerSeat || room.phase === "ended")),
-      route: seat.route,
-      routeLabel: routeLabel(seat),
+      melds: visibleMelds.map((meld) => snapshotMeld(meld, ownerView)),
+      route: visibleRoute,
+      routeLabel: visibleRoute === "drill" ? "钻了" : visibleRoute === "pung" ? "上摞" : "",
       hand: index === viewerSeat || room.winner ? sortedPhysicalHand(seat) : null
-    } : null),
+      };
+    }),
     log: room.log
   };
 }

@@ -57,9 +57,9 @@ test("四家弃牌区的外框互不相交且所有横屏尺寸提供牌局按�
   assert.match(cssSource, /\.layout-landscape \.mobile-info\s*\{[\s\S]*?display: block/);
 });
 
-test("碰、钻了和上摞动作都会写入牌局记录", () => {
+test("碰、公开钻牌和碰后上摞动作都会写入牌局记录", () => {
   assert.match(serverSource, /addLog\(room, `\$\{player\.name\} 碰了\$\{tileName\(claim\.tile\)\}/);
-  assert.match(serverSource, /addLog\(room, `\$\{player\.name\} 明示钻了/);
+  assert.match(serverSource, /addLog\(room, `\$\{player\.name\} 钻了\$\{tileName\(option\.waitingTile\)\}/);
   assert.match(serverSource, /addLog\(room, `\$\{player\.name\} 明示上摞/);
   assert.match(serverSource, /if \(meld\.stacked\) addLog\(room, `\$\{player\.name\} 按上摞路线/);
 });
@@ -259,4 +259,13 @@ test("积分使用乘法倍率且管理员出牌提醒可点击关闭", () => {
   assert.match(cssSource, /\.hand-console \.game-toast\.is-dismissible \{ pointer-events: auto; \}/);
   assert.match(cssSource, /html, body, #app, \.game \{ caret-color: transparent; \}/);
   assert.match(cssSource, /input, textarea, \[contenteditable="true"\] \{ caret-color: auto; \}/);
+});
+
+test("自摸上摞对手视为普通手牌且钻牌只公开钻入张", () => {
+  assert.match(serverSource, /seat\.melds\.filter\(\(meld\) => meld\.type !== "concealed-pong"\)/);
+  assert.match(serverSource, /handCount: seat\.hand\.length \+ \(ownerView \? 0 : concealedPongCount\)/);
+  assert.match(serverSource, /const visibleRoute = ownerView \|\| seat\.route !== "pung" \|\| hasPublicPungStack/);
+  assert.match(serverSource, /centerTile: option\.waitingTile/);
+  assert.match(appSource, /meld-drill-revealed/);
+  assert.match(appSource, /钻牌，只亮出/);
 });

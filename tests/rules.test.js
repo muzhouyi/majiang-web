@@ -54,11 +54,11 @@ test("摸到的牌按牌值进入手牌顺序，同时由 tileId 保留摸牌标
   assert.deepEqual(sortedPhysicalHand(player).map((entry) => entry.tileId), ["drawn-one", "nine", "pin-three"]);
 });
 
-test("钻牌和自摸上摞对其他玩家隐藏，碰来的上摞保持亮牌", () => {
+test("钻牌只亮钻入张，自摸上摞牌面隐藏，碰来的上摞保持亮牌", () => {
   const drillMeld = drill(["m1", "m2", "m3"]);
   const concealed = { id: "concealed", type: "concealed-pong", tiles: ["p5", "p5", "p5"], tileIds: ["a", "b", "c"], centerTile: "p5", stacked: true };
   const exposed = pong("s7", true);
-  assert.deepEqual(snapshotMeld(drillMeld, false).tiles, [null, null, null]);
+  assert.deepEqual(snapshotMeld(drillMeld, false).tiles, [null, "m2", null]);
   assert.deepEqual(snapshotMeld(concealed, false).tiles, [null, null, null]);
   assert.deepEqual(snapshotMeld(exposed, false).tiles, ["s7", "s7", "s7"]);
   assert.deepEqual(snapshotMeld(drillMeld, true).tiles, ["m1", "m2", "m3"]);
