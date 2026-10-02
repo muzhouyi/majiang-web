@@ -8,6 +8,8 @@ const PUBLIC_DIR = path.join(__dirname, "public");
 const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const ADMIN_DATA_FILE = path.join(DATA_DIR, "admin-data.json");
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
+const EMPTY_ROOM_TTL_MS = Number(process.env.EMPTY_ROOM_TTL_MS || 60_000);
+const ENDED_ROOM_TTL_MS = Number(process.env.ENDED_ROOM_TTL_MS || 180_000);
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 const rooms = new Map();
@@ -533,7 +535,10 @@ function createRoom(hostClient, mode) {
     replayFrames: [],
     replaySaved: false,
     restartVote: null,
-    timer: null
+    timer: null,
+    cleanupTimer: null,
+    emptySince: null,
+    lastActivity: Date.now()
   };
   rooms.set(id, room);
   sitClient(room, hostClient, 0);
@@ -572,7 +577,12 @@ function sitClient(room, client, preferredSeat = -1) {
   }
   client.roomId = room.id;
   client.seat = seat;
+  if (!room.hostProfileId) {
+    room.hostId = client.id;
+    room.hostProfileId = client.profileId;
+  }
   addLog(room, `${room.seats[seat].name} 坐到了${windName(seat)}位。`);
+  markRoomActivity(room);
   return seat;
 }
 
@@ -596,6 +606,7 @@ function reconnectClient(room, client) {
   client.roomId = room.id;
   client.seat = seatIndex;
   addLog(room, `${player.name} 重新加入并接管了${windName(seatIndex)}位。`);
+  markRoomActivity(room);
   broadcastRoom(room);
   if (room.phase === "claim") scheduleBotClaim(room);
   return true;
@@ -645,6 +656,9 @@ function startGame(room) {
   }
 
   clearRoomTimer(room);
+  clearRoomCleanupTimer(room);
+  room.emptySince = room.seats.some((seat) => seat && !seat.isBot) ? null : (room.emptySince || Date.now());
+  room.lastActivity = Date.now();
   room.log = [];
   room.logSequence = 0;
   room.replayFrames = [];
@@ -681,6 +695,7 @@ function startGame(room) {
   }
   addLog(room, "牌局开始，东风位先摸牌。");
   drawForCurrent(room);
+  scheduleRoomCleanup(room);
 }
 
 function drawForCurrent(room, afterKong = false) {
@@ -693,6 +708,8 @@ function drawForCurrent(room, afterKong = false) {
     room.roundResult = { text: "荒庄，本局不结算。", deltas: [0, 0, 0, 0], items: [] };
     addLog(room, room.winner.text);
     finalizeReplay(room);
+    room.lastActivity = Date.now();
+    scheduleRoomCleanup(room);
     broadcastRoom(room);
     return;
   }
@@ -979,6 +996,8 @@ function endWithWinner(room, seat, method, winningTile, fromSeat, gangShangKaiHu
   room.winner = { seat, name: player.name, method, text: `${player.name} ${method}胡牌！` };
   addLog(room, room.roundResult.text);
   finalizeReplay(room);
+  room.lastActivity = Date.now();
+  scheduleRoomCleanup(room);
   broadcastRoom(room);
   return true;
 }
@@ -1095,6 +1114,66 @@ function clearRoomTimer(room) {
   room.timer = null;
 }
 
+function clearRoomCleanupTimer(room) {
+  if (room.cleanupTimer) clearTimeout(room.cleanupTimer);
+  room.cleanupTimer = null;
+}
+
+function connectedHumanCount(room) {
+  return room.seats.filter((seat) => seat && !seat.isBot).length;
+}
+
+function roomCleanupDeadline(room, now = Date.now()) {
+  if (connectedHumanCount(room) === 0) {
+    const since = room.emptySince || now;
+    return { reason: "房间连续一分钟没有真人玩家，已自动解散。", deadline: since + EMPTY_ROOM_TTL_MS };
+  }
+  if (room.phase === "ended") {
+    return { reason: "牌局结束后三分钟没有操作，房间已自动解散。", deadline: (room.lastActivity || now) + ENDED_ROOM_TTL_MS };
+  }
+  return null;
+}
+
+function dissolveRoom(room, reason) {
+  clearRoomTimer(room);
+  clearRoomCleanupTimer(room);
+  for (const seat of room.seats) {
+    if (!seat || seat.isBot) continue;
+    const client = clients.get(seat.id);
+    if (!client) continue;
+    client.roomId = null;
+    client.seat = -1;
+    sendJson(client.socket, { type: "roomClosed", message: reason });
+  }
+  rooms.delete(room.id);
+}
+
+function scheduleRoomCleanup(room) {
+  clearRoomCleanupTimer(room);
+  const noHumans = connectedHumanCount(room) === 0;
+  if (noHumans) room.emptySince ||= Date.now();
+  else room.emptySince = null;
+  const cleanup = roomCleanupDeadline(room);
+  if (!cleanup) return;
+  const delay = Math.max(0, cleanup.deadline - Date.now());
+  room.cleanupTimer = setTimeout(() => {
+    const current = rooms.get(room.id);
+    if (current !== room) return;
+    const latest = roomCleanupDeadline(room);
+    if (!latest) return;
+    if (latest.deadline > Date.now()) {
+      scheduleRoomCleanup(room);
+      return;
+    }
+    dissolveRoom(room, latest.reason);
+  }, delay);
+}
+
+function markRoomActivity(room) {
+  room.lastActivity = Date.now();
+  scheduleRoomCleanup(room);
+}
+
 function isRoomHost(room, client) {
   return Boolean(client.profileId && room.hostProfileId === client.profileId);
 }
@@ -1110,13 +1189,9 @@ function removeWaitingSeat(room, seatIndex, message) {
   if (!player) return;
   room.seats[seatIndex] = null;
   if (player.profileId === room.hostProfileId) transferWaitingHost(room);
-  if (!room.seats.some((seat) => seat && !seat.isBot)) {
-    clearRoomTimer(room);
-    rooms.delete(room.id);
-    return;
-  }
   addLog(room, message || `${player.name} 离开了房间。`);
   broadcastRoom(room);
+  scheduleRoomCleanup(room);
 }
 
 function completeRestartVoteIfReady(room) {
@@ -1140,6 +1215,7 @@ function delegateSeat(room, seatIndex, reason = "离开") {
   player.isBot = true;
   player.connected = true;
   player.delegated = true;
+  scheduleRoomCleanup(room);
   addLog(room, `${player.name} ${reason}，已由电脑托管。`);
   if (completeRestartVoteIfReady(room)) return;
   broadcastRoom(room);
@@ -1203,7 +1279,7 @@ function roomSnapshot(room, viewerSeat) {
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   const viewerIsHost = viewer?.profileId === room.hostProfileId;
   return {
-    version: "2.6",
+    version: "2.7",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -1489,6 +1565,7 @@ function handleMessage(client, message) {
 
     const room = rooms.get(client.roomId);
     if (!room) return;
+    markRoomActivity(room);
     if (data.type === "addBots" && isRoomHost(room, client) && room.phase === "waiting") {
       fillBots(room);
       broadcastRoom(room);
@@ -1636,5 +1713,6 @@ module.exports = {
   makePlayer,
   delegatedSeatForProfile,
   roomDirectory,
+  roomCleanupDeadline,
   rooms
 };

@@ -164,3 +164,18 @@ test("管理员重命名和合并玩家前均要求二次确认", () => {
   assert.match(serverSource, /adminMergePlayers/);
   assert.match(serverSource, /target\.score = \(Number\(target\.score\)/);
 });
+
+test("横屏长动作文字保持完整并在空间不足时横向滚动", () => {
+  assert.match(cssSource, /\.action-buttons\s*\{[^}]*flex:\s*0 0 auto;[^}]*min-width:\s*max-content;/);
+  assert.match(cssSource, /\.action-buttons button\s*\{[^}]*flex:\s*0 0 auto;[^}]*min-width:\s*max-content;/);
+  assert.match(cssSource, /\.layout-landscape \.action-dock\s*\{[\s\S]*?width:\s*min\(72dvw, 680px\);[\s\S]*?overflow-x:\s*auto;/);
+  assert.doesNotMatch(cssSource, /max-width:\s*190px/);
+});
+
+test("空房间和结束房间由服务端定时解散并通知客户端", () => {
+  assert.match(serverSource, /EMPTY_ROOM_TTL_MS[\s\S]*?60_000/);
+  assert.match(serverSource, /ENDED_ROOM_TTL_MS[\s\S]*?180_000/);
+  assert.match(serverSource, /function scheduleRoomCleanup/);
+  assert.match(serverSource, /type: "roomClosed"/);
+  assert.match(appSource, /payload\.type === "roomClosed"/);
+});

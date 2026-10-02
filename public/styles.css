@@ -342,11 +342,11 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 .hand-rack { display: flex; align-items: flex-end; justify-content: center; width: max-content; max-width: calc(100dvw - 8px); }
 .hand-main-slots { display: grid; grid-template-columns: repeat(14, var(--hand-tile-width)); gap: 2px; }
 .hand-slot { display: block; width: var(--hand-tile-width); height: var(--hand-tile-height); flex: 0 0 var(--hand-tile-width); }
-.action-dock { position: absolute; left: 50%; bottom: calc(var(--hand-tile-height) + 6px); transform: translateX(-50%); display: flex; align-items: center; gap: 8px; white-space: nowrap; }
+.action-dock { position: absolute; left: 50%; bottom: calc(var(--hand-tile-height) + 6px); transform: translateX(-50%); display: flex; align-items: center; gap: 8px; max-width: calc(100dvw - 16px); min-width: 0; overflow-x: auto; overflow-y: hidden; white-space: nowrap; scrollbar-width: thin; }
 .turn-copy { display: grid; min-width: 128px; padding: 5px 8px; border-radius: 6px; background: rgba(10,35,29,.9); font-size: 11px; }
 .turn-copy span { color: var(--muted); font-size: 9px; }
-.action-buttons { display: flex; gap: 5px; align-items: center; }
-.action-buttons button { min-height: 38px; padding: 0 11px; }
+.action-buttons { display: flex; flex: 0 0 auto; gap: 5px; align-items: center; min-width: max-content; }
+.action-buttons button { flex: 0 0 auto; min-width: max-content; min-height: 38px; padding: 0 11px; white-space: nowrap; }
 .action-idle { padding: 7px 10px; border-radius: 6px; background: rgba(10,35,29,.82); color: var(--muted); font-size: 11px; }
 .self-melds { position: absolute; right: 0; bottom: calc(var(--hand-tile-height) + 51px); }
 .meld-shelf { display: flex; align-items: flex-end; gap: 5px; min-height: 38px; }
@@ -577,7 +577,7 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
   .layout-landscape .discard-grid { gap: 0; }
   .layout-landscape .action-dock {
     left: auto; right: max(8px, env(safe-area-inset-right)); bottom: calc(var(--hand-tile-height) + 4px);
-    transform: none; max-width: 190px; overflow-x: auto;
+    transform: none; width: min(72dvw, 680px); max-width: calc(100dvw - 16px); overflow-x: auto;
   }
   .layout-landscape .turn-copy { display: none; }
   .layout-landscape .action-buttons button { min-height: 34px; }

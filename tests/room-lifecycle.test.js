@@ -1,7 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 
-const { makePlayer, delegatedSeatForProfile, roomDirectory, rooms } = require("../server");
+const { makePlayer, delegatedSeatForProfile, roomDirectory, roomCleanupDeadline, rooms } = require("../server");
 
 function seat(name, profileId, options = {}) {
   const player = makePlayer({ id: options.id || profileId, name, isBot: Boolean(options.isBot) });
@@ -33,4 +33,25 @@ test("大厅区分可加入房间和原玩家可接管的托管座位", () => {
   assert.equal(playing.canRejoin, true);
   assert.equal(delegatedSeatForProfile(rooms.get("PLAY88"), "return-profile"), 1);
   rooms.clear();
+});
+
+test("empty and ended rooms use different inactivity deadlines", () => {
+  const now = 10_000_000;
+  const emptyRoom = {
+    phase: "discard",
+    seats: [seat("托管玩家", "profile-a", { isBot: true, delegated: true })],
+    emptySince: now - 15_000,
+    lastActivity: now
+  };
+  const endedRoom = {
+    phase: "ended",
+    seats: [seat("真人玩家", "profile-b")],
+    emptySince: null,
+    lastActivity: now - 25_000
+  };
+
+  assert.equal(roomCleanupDeadline(emptyRoom, now).deadline, now + 45_000);
+  assert.match(roomCleanupDeadline(emptyRoom, now).reason, /一分钟没有真人玩家/);
+  assert.equal(roomCleanupDeadline(endedRoom, now).deadline, now + 155_000);
+  assert.match(roomCleanupDeadline(endedRoom, now).reason, /三分钟没有操作/);
 });

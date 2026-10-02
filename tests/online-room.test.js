@@ -121,3 +121,39 @@ test("大厅、房主踢人、托管重连和全员重开可以连贯完成", as
   sourcePlayer.close();
   admin.close();
 });
+
+test("waiting room dissolves after the last real player has been gone for the configured minute", async (context) => {
+  const port = 32620;
+  const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), "majiang-v27-cleanup-"));
+  const child = spawn(process.execPath, [path.join(__dirname, "..", "server.js")], {
+    env: { ...process.env, ADMIN_PASSWORD: "test-admin-password", PORT: String(port), DATA_DIR: dataDir, EMPTY_ROOM_TTL_MS: "120" },
+    stdio: ["ignore", "pipe", "pipe"]
+  });
+  context.after(() => {
+    child.kill();
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("test server start timeout")), 4000);
+    child.stdout.on("data", (chunk) => {
+      if (!chunk.toString().includes("Mahjong web game running")) return;
+      clearTimeout(timer);
+      resolve();
+    });
+    child.once("exit", (code) => reject(new Error(`test server exited ${code}`)));
+  });
+
+  const owner = websocketClient(`ws://127.0.0.1:${port}`);
+  await owner.opened;
+  owner.send({ type: "create", mode: "online", name: "临时房主", profileId: "cleanup-owner" });
+  const created = await owner.waitFor((payload) => payload.type === "state" && payload.state.phase === "waiting");
+  owner.close();
+  await new Promise((resolve) => setTimeout(resolve, 260));
+
+  const observer = websocketClient(`ws://127.0.0.1:${port}`);
+  await observer.opened;
+  observer.send({ type: "listRooms", profileId: "cleanup-observer" });
+  const directory = await observer.waitFor((payload) => payload.type === "lobbyRooms");
+  assert.equal(directory.rooms.some((room) => room.id === created.state.roomId), false);
+  observer.close();
+});
