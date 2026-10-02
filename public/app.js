@@ -203,6 +203,12 @@ function renderBackTiles(count) {
   return slots.join("");
 }
 
+function renderRevealedOpponentTiles(hand = []) {
+  return Array.from({ length: 13 }, (_, index) => (
+    `<span class="opponent-slot">${hand[index] ? renderTile(hand[index], { size: "opponent-size" }) : ""}</span>`
+  )).join("");
+}
+
 function renderMeld(meld) {
   if (meld.hidden) {
     const back = '<span class="meld-back tile-back" aria-hidden="true"></span>';
@@ -255,7 +261,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v3.1</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v3.2</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -367,7 +373,7 @@ function renderAdminScoring() {
       ${numberField("闲家底分", "nonDealerBase", scoring.nonDealerBase)}
       ${numberField("自摸倍数", "selfDrawMultiplier", scoring.selfDrawMultiplier)}
       ${numberField("点炮包付倍数", "discardMultiplier", scoring.discardMultiplier)}
-    </div></section>
+    </div><label class="admin-toggle scoring-toggle"><span><strong>仅点炮者扣分</strong><small>开启后由打出胡牌张的玩家按点炮倍数包付；关闭后其余三家各付一份基础牌分。</small></span><input type="checkbox" data-discard-payer-only ${scoring.discardPayerOnly !== false ? "checked" : ""} /></label></section>
     <section class="admin-section"><h3>胡牌积分</h3><div class="admin-number-grid">${patterns.map((name) => numberField(name, name, scoring.patterns[name], "patterns")).join("")}</div></section>
     <section class="admin-section"><h3>杠牌积分</h3><p class="admin-note">每次杠牌即时结算，其余三家各支付所填分值；填 0 表示只记录、不计分。</p><div class="admin-number-grid">
       ${numberField("明杠", "明杠", scoring.actions["明杠"], "actions")}
@@ -419,7 +425,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.1</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.2</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
@@ -456,6 +462,7 @@ function bindAdminEvents() {
       if (group === "root") scoring[input.dataset.scoreKey] = Number(input.value);
       else scoring[group][input.dataset.scoreKey] = Number(input.value);
     });
+    scoring.discardPayerOnly = Boolean(event.currentTarget.querySelector("[data-discard-payer-only]")?.checked);
     send({ type: "adminUpdateScoring", scoring });
   });
   app.querySelector("[data-replay-enabled]")?.addEventListener("change", (event) => send({ type: "adminUpdateReplay", enabled: event.target.checked }));
@@ -509,10 +516,21 @@ function renderSeat(player) {
   const active = state.currentSeat === player.seat && !state.winner;
   const isSelf = player.seat === state.viewerSeat;
   const route = player.routeLabel ? `<span class="route-badge route-${player.route}">${player.routeLabel}</span>` : "";
-  const head = `<div class="seat-head"><span class="wind">${player.wind}</span><strong>${escapeHtml(player.name)}</strong>${route}<em>${player.score}</em></div>`;
+  const dealer = player.seat === state.dealerSeat ? '<span class="dealer-badge">庄</span>' : "";
+  const opponentTiles = state.winner && player.hand
+    ? renderRevealedOpponentTiles(player.hand)
+    : renderBackTiles(player.handCount);
+  const head = `<div class="seat-head"><span class="wind">${player.wind}</span><strong>${escapeHtml(player.name)}</strong>${dealer}${route}<em>${player.score}</em></div>`;
   return `<section class="seat seat-${position} ${active ? "seat-active" : ""} ${isSelf ? "seat-self" : ""}">
-    ${isSelf ? head : `<div class="opponent-rack">${head}<div class="opponent-melds">${renderMelds(player.melds)}</div><div class="opponent-hand">${renderBackTiles(player.handCount)}</div></div>`}
+    ${isSelf ? head : `<div class="opponent-rack">${head}<div class="opponent-melds">${renderMelds(player.melds)}</div><div class="opponent-hand ${state.winner ? "is-revealed" : ""}">${opponentTiles}</div></div>`}
   </section>`;
+}
+
+function renderDiceSummary() {
+  const rounds = state.diceRounds || [];
+  if (!rounds.length) return "";
+  const result = rounds.map((round, roundIndex) => `<div class="dice-round"><small>第 ${roundIndex + 1} 轮</small>${round.rolls.map((roll) => `<span><b>${escapeHtml(state.players[roll.seat]?.name || "")}</b><i>${roll.dice[0]}</i><i>${roll.dice[1]}</i><em>${roll.total}</em></span>`).join("")}</div>`).join("");
+  return `<section class="dice-summary" aria-label="开局掷骰结果"><header><strong>掷骰定庄</strong><small>${rounds.length > 1 ? `同点加掷 ${rounds.length - 1} 次` : "一次定庄"}</small></header>${result}</section>`;
 }
 
 function renderDiscardZone(player) {
@@ -581,6 +599,7 @@ function renderInfoContent() {
     ? '<button type="button" data-action="requestUndo">悔棋</button>'
     : "";
   return `<section class="room-panel"><div><small>房间号</small><strong>${state.roomId}</strong></div><button type="button" data-action="copy">复制</button>${undoButton}${restartButton}<button class="danger-quiet" type="button" data-action="leave">退出房间</button></section>
+    ${renderDiceSummary()}
     ${state.restartVote ? `<section class="restart-status"><strong>重新开局确认中</strong><span>${state.restartVote.approvedSeats.length} 个真人座位已同意，人机默认同意</span></section>` : ""}
     ${state.undoVote ? `<section class="restart-status"><strong>悔棋确认中</strong><span>${state.undoVote.approvedSeats.length} 个真人座位已同意，人机默认同意</span></section>` : ""}
     ${renderResult()}

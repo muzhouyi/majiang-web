@@ -46,6 +46,7 @@ const defaultAdminData = {
     nonDealerBase: 1,
     selfDrawMultiplier: 2,
     discardMultiplier: 3,
+    discardPayerOnly: true,
     patterns: defaultPatternPoints,
     actions: { "明杠": 0, "暗杠": 0 }
   },
@@ -86,6 +87,52 @@ function loadAdminData() {
 }
 
 const adminData = loadAdminData();
+
+function normalizedPlayerName(name) {
+  return String(name || "").normalize("NFKC").trim().replace(/\s+/g, " ").toLocaleLowerCase("zh-CN");
+}
+
+function deduplicatePlayerProfiles() {
+  adminData.profileAliases ||= {};
+  const canonicalByName = new Map();
+  let changed = false;
+  for (const [profileId, player] of Object.entries(adminData.players)) {
+    const key = normalizedPlayerName(player.name);
+    if (!key) continue;
+    const canonicalId = canonicalByName.get(key);
+    if (!canonicalId) {
+      canonicalByName.set(key, profileId);
+      continue;
+    }
+    const canonical = adminData.players[canonicalId];
+    canonical.score = (Number(canonical.score) || 0) + (Number(player.score) || 0);
+    canonical.updatedAt = Math.max(Number(canonical.updatedAt) || 0, Number(player.updatedAt) || 0, Date.now());
+    adminData.profileAliases[profileId] = canonicalId;
+    delete adminData.players[profileId];
+    for (const entry of adminData.playerScores.history || []) {
+      if (entry.profileId === profileId) entry.profileId = canonicalId;
+    }
+    changed = true;
+  }
+  return changed;
+}
+
+function resolveProfileId(profileId, name) {
+  adminData.profileAliases ||= {};
+  let resolved = String(profileId || "");
+  const visited = new Set();
+  while (adminData.profileAliases[resolved] && !visited.has(resolved)) {
+    visited.add(resolved);
+    resolved = adminData.profileAliases[resolved];
+  }
+  const key = normalizedPlayerName(name);
+  const matched = Object.entries(adminData.players)
+    .find(([, player]) => normalizedPlayerName(player.name) === key)?.[0];
+  if (matched && resolved && matched !== resolved) adminData.profileAliases[resolved] = matched;
+  return matched || resolved;
+}
+
+if (deduplicatePlayerProfiles()) saveAdminData();
 
 function saveAdminData() {
   fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -441,8 +488,9 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
   const winner = room.seats[winnerSeat];
   const evaluation = evaluateWin(winner, winner.hand);
   const scoring = adminData.scoring;
-  const base = winnerSeat === 0 ? scoring.dealerBase : scoring.nonDealerBase;
-  const items = [{ name: winnerSeat === 0 ? "庄家底分" : "闲家底分", points: base }];
+  const isDealer = winnerSeat === room.dealerSeat;
+  const base = isDealer ? scoring.dealerBase : scoring.nonDealerBase;
+  const items = [{ name: isDealer ? "庄家底分" : "闲家底分", points: base }];
   let handPoints = base;
   for (const pattern of evaluation.patterns) {
     const points = scoring.patterns[pattern] || 0;
@@ -471,10 +519,19 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
     }
   } else {
     const payer = typeof fromSeat === "number" ? fromSeat : room.pendingClaim?.fromSeat;
-    const totalPayment = payment * scoring.discardMultiplier;
-    deltas[payer] -= totalPayment;
-    deltas[winnerSeat] += totalPayment;
-    items.push({ name: "点炮包三家", points: totalPayment });
+    if (scoring.discardPayerOnly !== false) {
+      const totalPayment = payment * scoring.discardMultiplier;
+      deltas[payer] -= totalPayment;
+      deltas[winnerSeat] += totalPayment;
+      items.push({ name: "仅点炮者扣分", points: totalPayment });
+    } else {
+      for (let seat = 0; seat < 4; seat += 1) {
+        if (seat === winnerSeat) continue;
+        deltas[seat] -= payment;
+        deltas[winnerSeat] += payment;
+      }
+      items.push({ name: "其余三家各付", points: payment });
+    }
   }
 
   for (let seat = 0; seat < 4; seat += 1) {
@@ -532,6 +589,8 @@ function createRoom(hostClient, mode) {
     hostProfileId: hostClient.profileId,
     seats: [null, null, null, null],
     wall: [],
+    dealerSeat: null,
+    diceRounds: [],
     currentSeat: 0,
     phase: "waiting",
     lastDiscard: null,
@@ -563,6 +622,7 @@ function createRoom(hostClient, mode) {
 }
 
 function sitClient(room, client, preferredSeat = -1) {
+  client.profileId = resolveProfileId(client.profileId, client.name);
   const replaceable = (entry) => !entry || (room.phase === "waiting" && entry.isBot && !entry.delegated);
   const seat = preferredSeat >= 0 && replaceable(room.seats[preferredSeat])
     ? preferredSeat
@@ -668,6 +728,8 @@ function startGame(room) {
     return;
   }
 
+  const previousPhase = room.phase;
+  const previousWinner = room.winner;
   clearRoomTimer(room);
   clearRoomCleanupTimer(room);
   room.emptySince = room.seats.some((seat) => seat && !seat.isBot) ? null : (room.emptySince || Date.now());
@@ -677,7 +739,16 @@ function startGame(room) {
   room.replayFrames = [];
   room.replaySaved = false;
   room.wall = makeDeck();
-  room.currentSeat = 0;
+  if (room.dealerSeat === null) {
+    room.diceRounds = rollForDealer(room);
+    room.dealerSeat = room.diceRounds.at(-1).winners[0];
+  } else if (previousPhase === "ended" && previousWinner?.seat !== undefined && previousWinner.seat !== room.dealerSeat) {
+    room.dealerSeat = (room.dealerSeat + 1) % 4;
+    room.diceRounds = [];
+  } else {
+    room.diceRounds = [];
+  }
+  room.currentSeat = room.dealerSeat;
   room.phase = "playing";
   room.lastDiscard = null;
   room.winner = null;
@@ -708,9 +779,36 @@ function startGame(room) {
       seat.handTileIds.push(instance.tileId);
     }
   }
-  addLog(room, "牌局开始，东风位先摸牌。");
+  if (room.diceRounds.length) {
+    const rounds = room.diceRounds.map((round, index) => `第${index + 1}轮：${round.rolls.map((roll) => `${room.seats[roll.seat].name}${roll.dice[0]}+${roll.dice[1]}=${roll.total}`).join("，")}`).join("；");
+    addLog(room, `开局掷骰定庄。${rounds}。${room.seats[room.dealerSeat].name} 点数最高成为庄家。`);
+  } else if (previousWinner?.seat === room.dealerSeat) {
+    addLog(room, `${room.seats[room.dealerSeat].name} 胡牌，继续连庄。`);
+  } else {
+    addLog(room, `庄家逆时针移到 ${room.seats[room.dealerSeat].name}。`);
+  }
+  addLog(room, `牌局开始，${room.seats[room.dealerSeat].name}（庄家）先摸牌。`);
   drawForCurrent(room);
   scheduleRoomCleanup(room);
+}
+
+function rollDie() {
+  return 1 + Math.floor(Math.random() * 6);
+}
+
+function rollForDealer(room) {
+  let contenders = room.seats.map((_, seat) => seat);
+  const rounds = [];
+  do {
+    const rolls = contenders.map((seat) => {
+      const dice = [rollDie(), rollDie()];
+      return { seat, dice, total: dice[0] + dice[1] };
+    });
+    const highest = Math.max(...rolls.map((roll) => roll.total));
+    contenders = rolls.filter((roll) => roll.total === highest).map((roll) => roll.seat);
+    rounds.push({ rolls, highest, winners: [...contenders] });
+  } while (contenders.length > 1);
+  return rounds;
 }
 
 function drawForCurrent(room, afterKong = false) {
@@ -1432,7 +1530,7 @@ function roomSnapshot(room, viewerSeat) {
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   const viewerIsHost = viewer?.profileId === room.hostProfileId;
   return {
-    version: "3.1",
+    version: "3.2",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -1442,6 +1540,8 @@ function roomSnapshot(room, viewerSeat) {
     phase: room.phase,
     claimStage: claim?.stage || null,
     currentSeat: room.currentSeat,
+    dealerSeat: room.dealerSeat,
+    diceRounds: clone(room.diceRounds || []),
     wallCount: room.wall.length,
     lastDiscard: room.lastDiscard,
     latestDiscardTileId: room.lastDiscard?.tileId || null,
@@ -1481,7 +1581,7 @@ function roomSnapshot(room, viewerSeat) {
       roundDelta: seat.roundDelta,
       handCount: seat.hand.length,
       discards: seat.discards,
-      melds: seat.melds.map((meld) => snapshotMeld(meld, index === viewerSeat)),
+      melds: seat.melds.map((meld) => snapshotMeld(meld, index === viewerSeat || room.phase === "ended")),
       route: seat.route,
       routeLabel: routeLabel(seat),
       hand: index === viewerSeat || room.winner ? sortedPhysicalHand(seat) : null
@@ -1534,6 +1634,7 @@ function handleAdminMessage(client, data) {
     adminData.scoring.nonDealerBase = numericSetting(incoming.nonDealerBase, adminData.scoring.nonDealerBase);
     adminData.scoring.selfDrawMultiplier = numericSetting(incoming.selfDrawMultiplier, adminData.scoring.selfDrawMultiplier, 1, 20);
     adminData.scoring.discardMultiplier = numericSetting(incoming.discardMultiplier, adminData.scoring.discardMultiplier, 1, 20);
+    adminData.scoring.discardPayerOnly = incoming.discardPayerOnly !== false;
     for (const key of Object.keys(defaultPatternPoints)) {
       adminData.scoring.patterns[key] = numericSetting(incoming.patterns?.[key], adminData.scoring.patterns[key]);
     }
@@ -1585,6 +1686,36 @@ function handleAdminMessage(client, data) {
     }
     player.name = newName;
     player.updatedAt = Date.now();
+    const duplicateId = Object.entries(adminData.players)
+      .find(([id, entry]) => id !== playerId && normalizedPlayerName(entry.name) === normalizedPlayerName(newName))?.[0];
+    if (duplicateId) {
+      const target = adminData.players[duplicateId];
+      target.score = (Number(target.score) || 0) + (Number(player.score) || 0);
+      target.updatedAt = Date.now();
+      adminData.profileAliases[playerId] = duplicateId;
+      delete adminData.players[playerId];
+      for (const entry of adminData.playerScores.history || []) {
+        if (entry.profileId === playerId) entry.profileId = duplicateId;
+      }
+      for (const room of rooms.values()) {
+        for (const seated of room.seats) {
+          if (seated?.profileId !== playerId) continue;
+          seated.profileId = duplicateId;
+          seated.name = target.name;
+          seated.score = target.score;
+        }
+        if (room.hostProfileId === playerId) room.hostProfileId = duplicateId;
+        broadcastRoom(room);
+      }
+      for (const connectedClient of clients.values()) {
+        if (connectedClient.profileId !== playerId) continue;
+        connectedClient.profileId = duplicateId;
+        connectedClient.name = target.name;
+      }
+      saveAdminData();
+      sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "昵称与已有玩家相同，记录已自动合并。" });
+      return true;
+    }
     for (const room of rooms.values()) {
       const seated = room.seats.find((entry) => entry?.profileId === playerId);
       if (seated) seated.name = newName;
@@ -1615,6 +1746,7 @@ function handleAdminMessage(client, data) {
     target.score = (Number(target.score) || 0) + (Number(source.score) || 0);
     target.updatedAt = Date.now();
     delete adminData.players[sourceId];
+    adminData.profileAliases[sourceId] = targetId;
     for (const room of rooms.values()) {
       let changed = false;
       for (const seated of room.seats) {
@@ -1714,12 +1846,14 @@ function handleMessage(client, message) {
     if (data.type === "create") {
       client.name = String(data.name || "玩家").slice(0, 12);
       client.profileId = String(data.profileId || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 64) || client.id;
+      client.profileId = resolveProfileId(client.profileId, client.name);
       createRoom(client, data.mode === "solo" ? "solo" : "online");
       return;
     }
     if (data.type === "join") {
       client.name = String(data.name || "玩家").slice(0, 12);
       client.profileId = String(data.profileId || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 64) || client.id;
+      client.profileId = resolveProfileId(client.profileId, client.name);
       const room = rooms.get(String(data.roomId || "").trim().toUpperCase());
       if (!room) return sendJson(client.socket, { type: "error", message: "没有找到这个房间。" });
       if (reconnectClient(room, client)) return;
@@ -1890,6 +2024,7 @@ module.exports = {
   evaluateWin,
   drillCompletionOptions,
   concealedKongOptions,
+  rollForDealer,
   makePlayer,
   delegatedSeatForProfile,
   roomDirectory,

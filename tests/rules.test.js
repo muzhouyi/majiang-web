@@ -13,6 +13,7 @@ const {
   evaluateWin,
   drillCompletionOptions,
   concealedKongOptions,
+  rollForDealer,
   makePlayer,
   makeDeck,
   sortedPhysicalHand,
@@ -182,4 +183,18 @@ test("暗杠对其他玩家显示四张牌背", () => {
   const meld = { type: "concealed-kong", tiles: ["s8", "s8", "s8", "s8"], tileIds: ["a", "b", "c", "d"] };
   assert.deepEqual(snapshotMeld(meld, false).tiles, [null, null, null, null]);
   assert.deepEqual(snapshotMeld(meld, true).tiles, ["s8", "s8", "s8", "s8"]);
+});
+
+test("开局掷骰每人使用两枚骰子，同点时只让最高点玩家继续加掷", () => {
+  const room = { seats: Array.from({ length: 4 }, (_, seat) => ({ name: `玩家${seat + 1}` })) };
+  for (let attempt = 0; attempt < 100; attempt += 1) {
+    const rounds = rollForDealer(room);
+    assert.ok(rounds.length >= 1);
+    assert.equal(rounds[0].rolls.length, 4);
+    assert.equal(rounds.at(-1).winners.length, 1);
+    for (let index = 0; index < rounds.length; index += 1) {
+      assert.ok(rounds[index].rolls.every((roll) => roll.dice.length === 2 && roll.dice.every((die) => die >= 1 && die <= 6)));
+      if (index > 0) assert.deepEqual(rounds[index].rolls.map((roll) => roll.seat), rounds[index - 1].winners);
+    }
+  }
 });

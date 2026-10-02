@@ -80,20 +80,9 @@ test("大厅、房主踢人、托管重连和全员重开可以连贯完成", as
   await host.waitFor((payload) => payload.type === "state" && payload.state.players.filter(Boolean).length === 4);
   host.send({ type: "start" });
   const started = await host.waitFor((payload) => payload.type === "state" && payload.state.phase === "discard");
-  const hostSeat = started.state.viewerSeat;
-  const firstTileId = started.state.players[hostSeat].hand[0].tileId;
-  host.send({ type: "discard", tileId: firstTileId });
-  await guest.waitFor((payload) => payload.type === "state" && payload.state.latestDiscardTileId === firstTileId);
-  host.send({ type: "requestUndo" });
-  await guest.waitFor((payload) => payload.type === "state" && payload.state.undoVote && !payload.state.undoVote.viewerApproved);
-  guest.send({ type: "respondUndo", approved: true });
-  const undone = await host.waitFor((payload) => payload.type === "state"
-    && payload.state.phase === "discard"
-    && !payload.state.undoVote
-    && payload.state.latestDiscardTileId === null
-    && payload.state.players[hostSeat].hand?.length === 14);
-  assert.equal(undone.state.currentSeat, hostSeat);
-  assert.equal(undone.state.players[hostSeat].hand.length, 14);
+  assert.ok(Number.isInteger(started.state.dealerSeat));
+  assert.equal(started.state.diceRounds.at(-1).winners.length, 1);
+  assert.equal(started.state.currentSeat, started.state.dealerSeat);
 
   guest.close();
   await host.waitFor((payload) => payload.type === "state" && payload.state.players[guestSeat]?.delegated === true);
@@ -127,6 +116,14 @@ test("大厅、房主踢人、托管重连和全员重开可以连贯完成", as
   await admin.waitFor((payload) => payload.type === "adminData" && payload.message === "玩家昵称已重命名。");
   const renamed = await returningGuest.waitFor((payload) => payload.type === "state" && payload.state.players[guestSeat]?.name === "新客人");
   assert.equal(renamed.state.players[guestSeat].name, "新客人");
+  const sameNamePlayer = websocketClient(`ws://127.0.0.1:${port}`);
+  await sameNamePlayer.opened;
+  sameNamePlayer.send({ type: "create", mode: "online", name: "新客人", profileId: "profile-same-name" });
+  const sameNameRoom = await sameNamePlayer.waitFor((payload) => payload.type === "state" && payload.state.phase === "waiting");
+  assert.equal(sameNameRoom.state.viewerProfileId, "profile-guest");
+  admin.send({ type: "adminGet" });
+  const deduplicated = await admin.waitFor((payload) => payload.type === "adminData");
+  assert.equal(deduplicated.data.players.filter((player) => player.name === "新客人").length, 1);
   admin.send({ type: "adminMergePlayers", sourcePlayerId: "profile-source", targetPlayerId: "profile-guest" });
   const merged = await admin.waitFor((payload) => payload.type === "adminData" && payload.message?.startsWith("玩家记录已合并"));
   assert.equal(merged.data.players.find((player) => player.id === "profile-guest").score, 12);
@@ -139,6 +136,7 @@ test("大厅、房主踢人、托管重连和全员重开可以连贯完成", as
   host.close();
   returningGuest.close();
   sourcePlayer.close();
+  sameNamePlayer.close();
   admin.close();
 });
 

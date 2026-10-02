@@ -203,6 +203,16 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 .turn-marker { display: grid; place-items: center; width: 100%; text-align: center; }
 .turn-marker strong { font-family: SimSun, serif; font-size: clamp(24px, 5vmin, 46px); line-height: 1; color: #f0d67c; }
 .turn-marker span { max-width: 88%; margin-top: 4px; overflow: hidden; text-overflow: ellipsis; color: #d4e4dd; font-size: 10px; white-space: nowrap; }
+.dice-summary { display: grid; gap: 5px; padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.dice-summary header { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.dice-summary header strong { color: #f0d67c; font-size: 13px; }
+.dice-summary header small { color: var(--muted); font-size: 9px; }
+.dice-round { display: grid; gap: 3px; }
+.dice-round > small { color: var(--muted); font-size: 9px; }
+.dice-round > span { display: grid; grid-template-columns: minmax(0, 1fr) 17px 17px 20px; align-items: center; gap: 4px; color: #d4e4dd; font-size: 10px; }
+.dice-summary b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
+.dice-summary i { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 4px; background: #f1eee3; color: #153c32; font-style: normal; font-weight: 700; box-shadow: inset 0 0 0 1px rgba(0,0,0,.14); }
+.dice-summary em { color: #f0d67c; font-style: normal; font-variant-numeric: tabular-nums; }
 
 .seat { position: absolute; z-index: 12; color: #eef6f2; pointer-events: none; }
 .seat-head {
@@ -212,6 +222,7 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 }
 .seat-head strong { min-width: 0; max-width: 90px; overflow: hidden; text-overflow: ellipsis; }
 .seat-head em { margin-left: auto; color: #f1d583; font-style: normal; }
+.dealer-badge { display: inline-grid; place-items: center; flex: 0 0 auto; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 4px; background: #c99a2e; color: #10271f; font-size: 10px; font-weight: 800; }
 .wind { display: grid; place-items: center; width: 21px; height: 21px; flex: 0 0 21px; border-radius: 50%; background: #e9e1cd; color: #26352f; font-family: SimSun, serif; }
 .route-badge { padding: 2px 4px; border-radius: 4px; color: #10211b; font-size: 9px; }
 .route-drill { background: #70cfa8; }
@@ -232,6 +243,7 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 
 .opponent-hand { display: grid; grid-template-columns: repeat(13, var(--opponent-tile-width)); gap: 1px; width: max-content; margin-top: 3px; transform-origin: center; }
 .opponent-slot { display: grid; place-items: center; width: var(--opponent-tile-width); height: var(--opponent-tile-height); }
+.tile-opponent-size { width: var(--opponent-tile-width); height: var(--opponent-tile-height); min-width: var(--opponent-tile-width); }
 .tile-back {
   display: block; width: 100%; height: 100%; border: 1px solid #0b4e42; border-radius: 3px;
   background: #247b69; box-shadow: inset 0 0 0 2px #2f8b77, 0 1px 2px rgba(0,0,0,.24);
@@ -264,6 +276,8 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 .seat-left .tile-back, .seat-right .tile-back { width: var(--opponent-tile-width); height: var(--opponent-tile-height); }
 .seat-left .tile-back { transform: rotate(90deg); }
 .seat-right .tile-back { transform: rotate(-90deg); }
+.seat-left .tile-opponent-size { transform: rotate(90deg); }
+.seat-right .tile-opponent-size { transform: rotate(-90deg); }
 .seat-left .opponent-melds {
   left: calc(var(--opponent-tile-height) + 48px); top: 34px;
   transform: rotate(90deg); transform-origin: top left;
@@ -447,6 +461,8 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 .admin-toggle > span { display: grid; gap: 3px; }
 .admin-toggle small { color: var(--muted); font-size: 10px; }
 .admin-toggle input { width: 22px; height: 22px; accent-color: #65bd9a; }
+.scoring-toggle { margin-top: 14px; padding-top: 14px; border-top: 1px solid rgba(255,255,255,.08); }
+.opponent-hand.is-revealed { gap: 1px; }
 .replay-list { display: grid; }
 .replay-list-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px; align-items: stretch; border-bottom: 1px solid rgba(255,255,255,.08); }
 .replay-list-row .replay-open { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; min-height: 58px; border: 0; border-radius: 0; background: transparent; text-align: left; }
