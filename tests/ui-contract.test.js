@@ -188,3 +188,13 @@ test("当前玩家信息靠左且管理员可在大厅删除房间", () => {
   assert.match(serverSource, /const roomSweepTimer = setInterval/);
   assert.match(appSource, /lobbyRefreshTimer = setInterval/);
 });
+
+test("重新开局藏入牌局且横屏即时操作区固定右对齐", () => {
+  const actionsSource = appSource.slice(appSource.indexOf("function renderActions()"), appSource.indexOf("function renderInfoContent()"));
+  const infoSource = appSource.slice(appSource.indexOf("function renderInfoContent()"), appSource.indexOf("function renderScore("));
+  assert.doesNotMatch(actionsSource, /data-action="requestRestart"/);
+  assert.match(infoSource, /data-action="requestRestart"/);
+  assert.match(cssSource, /\.layout-landscape \.action-dock\s*\{[\s\S]*?position:\s*fixed;[^}]*right:\s*max\(8px, env\(safe-area-inset-right\)\);[^}]*justify-content:\s*flex-end;/);
+  assert.match(cssSource, /\.layout-landscape \.action-buttons\s*\{[^}]*margin-left:\s*auto;[^}]*justify-content:\s*flex-end;/);
+  assert.match(cssSource, /\.layout-landscape \.turn-copy\s*\{\s*display:\s*none;/);
+});

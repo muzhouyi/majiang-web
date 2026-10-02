@@ -254,7 +254,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v2.8</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v2.9</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -416,7 +416,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.8</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.9</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
@@ -540,7 +540,6 @@ function renderActions() {
     buttons.push('<button type="button" data-action="addBots">补电脑</button>');
     buttons.push('<button class="primary" type="button" data-action="start">开始</button>');
   }
-  if (state.canRequestRestart) buttons.push('<button class="primary" type="button" data-action="requestRestart">重新开局</button>');
   if (state.restartVote && !state.restartVote.viewerApproved) {
     buttons.push('<button class="primary" type="button" data-action="approveRestart">同意重开</button>');
     buttons.push('<button class="danger-quiet" type="button" data-action="rejectRestart">拒绝</button>');
@@ -564,7 +563,10 @@ function renderActions() {
 
 function renderInfoContent() {
   const fallbackStep = state.log.length;
-  return `<section class="room-panel"><div><small>房间号</small><strong>${state.roomId}</strong></div><button type="button" data-action="copy">复制</button><button class="danger-quiet" type="button" data-action="leave">退出房间</button></section>
+  const restartButton = state.canRequestRestart
+    ? '<button class="primary" type="button" data-action="requestRestart">重新开局</button>'
+    : "";
+  return `<section class="room-panel"><div><small>房间号</small><strong>${state.roomId}</strong></div><button type="button" data-action="copy">复制</button>${restartButton}<button class="danger-quiet" type="button" data-action="leave">退出房间</button></section>
     ${state.restartVote ? `<section class="restart-status"><strong>重新开局确认中</strong><span>${state.restartVote.approvedSeats.length} 个真人座位已同意，人机默认同意</span></section>` : ""}
     ${renderResult()}
     <section class="score-panel"><h2>积分</h2>${state.players.filter(Boolean).map(renderScore).join("")}</section>

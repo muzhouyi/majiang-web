@@ -1292,7 +1292,7 @@ function roomSnapshot(room, viewerSeat) {
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   const viewerIsHost = viewer?.profileId === room.hostProfileId;
   return {
-    version: "2.8",
+    version: "2.9",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
