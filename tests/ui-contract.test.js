@@ -5,6 +5,7 @@ const path = require("node:path");
 
 const appSource = fs.readFileSync(path.join(__dirname, "..", "public", "app.js"), "utf8");
 const cssSource = fs.readFileSync(path.join(__dirname, "..", "public", "styles.css"), "utf8");
+const serverSource = fs.readFileSync(path.join(__dirname, "..", "server.js"), "utf8");
 
 test("手机布局状态只通过共享根容器类切换", () => {
   assert.match(appSource, /layout-landscape/);
@@ -45,9 +46,20 @@ test("discard faces stay inside fixed slots and rotation preserves grid occupanc
   assert.doesNotMatch(cssSource, /\.discard-(?:top|left|right) \.discard-face\s*\{[^}]*transform/);
 });
 
-test("the title uses a transparent glyph instead of a complete tile SVG", () => {
-  assert.match(appSource, /function renderBrandGlyph\(\)/);
-  assert.match(appSource, /class="brand-mark">\$\{renderBrandGlyph\(\)\}/);
-  assert.match(appSource, /class="mini-mark">\$\{renderBrandGlyph\(\)\}/);
-  assert.doesNotMatch(appSource, /class="brand-mark">\$\{renderTile\("C"\)/);
+test("标题恢复 v1.6 的红中麻将 SVG 且不叠加 CSS 白色牌身", () => {
+  assert.match(appSource, /class="brand-mark">\$\{renderTile\("C"\)\}/);
+  assert.match(appSource, /class="mini-mark">\$\{renderTile\("C", \{ size: "micro" \}\)\}/);
+  assert.match(cssSource, /\.brand-mark \.tile\s*\{[\s\S]*?border: 0; background: transparent; box-shadow: none;/);
+});
+
+test("四家弃牌区的外框互不相交且所有横屏尺寸提供牌局按钮", () => {
+  assert.match(cssSource, /\.discard-left\s*\{[\s\S]*?var\(--discard-tile-width\)[\s\S]*?9px/);
+  assert.match(cssSource, /\.layout-landscape \.mobile-info\s*\{[\s\S]*?display: block/);
+});
+
+test("碰、钻了和上摞动作都会写入牌局记录", () => {
+  assert.match(serverSource, /addLog\(room, `\$\{player\.name\} 碰了\$\{tileName\(claim\.tile\)\}/);
+  assert.match(serverSource, /addLog\(room, `\$\{player\.name\} 明示钻了/);
+  assert.match(serverSource, /addLog\(room, `\$\{player\.name\} 明示上摞/);
+  assert.match(serverSource, /if \(meld\.stacked\) addLog\(room, `\$\{player\.name\} 按上摞路线/);
 });
