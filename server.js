@@ -852,7 +852,7 @@ function roomSnapshot(room, viewerSeat) {
   const isResponder = Boolean(claim && claim.responders.includes(viewerSeat) && !claim.passed.includes(viewerSeat));
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   return {
-    version: "1.9",
+    version: "2.0",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat && seat.id === room.hostId),

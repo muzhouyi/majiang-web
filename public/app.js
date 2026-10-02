@@ -163,11 +163,15 @@ function renderMelds(melds) {
   return melds?.length ? `<div class="meld-shelf">${melds.map(renderMeld).join("")}</div>` : "";
 }
 
+function renderBrandGlyph() {
+  return '<span class="brand-glyph" aria-hidden="true">中</span>';
+}
+
 function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
-      <div class="brand-mark">${renderTile("C")}</div>
-      <div><p class="eyebrow">东光规则 · v1.9</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div class="brand-mark">${renderBrandGlyph()}</div>
+      <div><p class="eyebrow">东光规则 · v2.0</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -202,7 +206,7 @@ function renderGame() {
   app.innerHTML = `<section class="game layout-${layoutMode}">
     <header class="gamebar">
       <div class="game-identity">
-        <span class="mini-mark">${renderTile("C", { size: "micro" })}</span>
+        <span class="mini-mark">${renderBrandGlyph()}</span>
         <div><strong>青桌麻将</strong><small>${state.mode === "solo" ? "单人局" : `房间 ${state.roomId}`} · v${state.version}</small></div>
       </div>
       <div class="round-stats"><span>余牌 <b>${state.wallCount}</b></span><span>${connection}</span></div>
