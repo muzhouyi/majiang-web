@@ -47,8 +47,8 @@ test("discard faces stay inside fixed slots and rotation preserves grid occupanc
 });
 
 test("标题恢复 v1.6 的红中麻将 SVG 且不叠加 CSS 白色牌身", () => {
-  assert.match(appSource, /class="brand-mark">\$\{renderTile\("C"\)\}/);
-  assert.match(appSource, /class="mini-mark">\$\{renderTile\("C", \{ size: "micro" \}\)\}/);
+  assert.match(appSource, /class="brand-mark admin-trigger"[^>]*>\$\{renderTile\("C"\)\}/);
+  assert.match(appSource, /class="mini-mark admin-trigger"[^>]*>\$\{renderTile\("C", \{ size: "micro" \}\)\}/);
   assert.match(cssSource, /\.brand-mark \.tile\s*\{[\s\S]*?border: 0; background: transparent; box-shadow: none;/);
 });
 
@@ -81,9 +81,34 @@ test("横屏牌局内容只通过点击浮层显示", () => {
 
 test("牌局记录保留时间步骤号并将最新消息显示在上方", () => {
   assert.match(serverSource, /logSequence: 0/);
-  assert.match(serverSource, /room\.log = \[\];\s*room\.logSequence = 0;\s*room\.wall = makeDeck\(\)/);
+  assert.match(serverSource, /room\.log = \[\];\s*room\.logSequence = 0;[\s\S]*?room\.wall = makeDeck\(\)/);
   assert.match(serverSource, /room\.log\.unshift\(\{ step: room\.logSequence/);
   assert.doesNotMatch(serverSource, /room\.log = room\.log\.slice\(0, 24\)/);
   assert.match(appSource, /<ol reversed>/);
   assert.match(appSource, /<li value="\$\{entry\.step/);
+});
+
+test("管理入口必须六击红中并由服务端校验密码", () => {
+  assert.match(appSource, /adminTapCount < 6/);
+  assert.match(appSource, /type: "adminLogin"/);
+  assert.match(serverSource, /ADMIN_PASSWORD = process\.env\.ADMIN_PASSWORD \|\| ""/);
+  assert.match(serverSource, /crypto\.timingSafeEqual/);
+});
+
+test("管理面板包含积分、回放和真实玩家积分设置", () => {
+  assert.match(appSource, /data-admin-tab="scoring"/);
+  assert.match(appSource, /data-admin-tab="replay"/);
+  assert.match(appSource, /data-admin-tab="players"/);
+  assert.match(serverSource, /adminUpdateScoring/);
+  assert.match(serverSource, /adminUpdateReplay/);
+  assert.match(serverSource, /adminUpdatePlayer/);
+});
+
+test("明杠暗杠使用四张并进入现有明示牌架", () => {
+  assert.match(appSource, /data-action="kong"/);
+  assert.match(appSource, /data-concealed-kong/);
+  assert.match(appSource, /meld-kong/);
+  assert.match(serverSource, /type: "exposed-kong"/);
+  assert.match(serverSource, /type: "concealed-kong"/);
+  assert.match(serverSource, /drawForCurrent\(room, true\)/);
 });

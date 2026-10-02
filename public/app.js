@@ -11,6 +11,7 @@ const tileAssetMap = {
 };
 
 const LAYOUT_KEY = "majiang:layoutMode";
+const PROFILE_KEY = "majiang:profileId";
 const DISCARD_SLOTS = 30;
 let socket;
 let state = null;
@@ -20,7 +21,20 @@ let reconnectTimer = null;
 let latestDiscardTileId = null;
 let drawnTileId = null;
 let selectedTileId = null;
+let adminOpen = false;
+let adminUnlocked = false;
+let adminData = null;
+let adminTab = "scoring";
+let adminReplay = null;
+let replayFrameIndex = 0;
+let adminTapCount = 0;
+let adminTapStartedAt = 0;
 let name = localStorage.getItem("majiang:name") || `玩家${Math.floor(Math.random() * 90) + 10}`;
+let profileId = localStorage.getItem(PROFILE_KEY);
+if (!profileId) {
+  profileId = globalThis.crypto?.randomUUID?.() || `player-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  localStorage.setItem(PROFILE_KEY, profileId);
+}
 let layoutMode = ["landscape", "portrait"].includes(localStorage.getItem(LAYOUT_KEY))
   ? localStorage.getItem(LAYOUT_KEY)
   : (window.innerWidth >= window.innerHeight ? "landscape" : "portrait");
@@ -51,6 +65,18 @@ function connect() {
       selectedTileId = null;
       toast = "已退出房间";
     } else if (payload.type === "error") {
+      toast = payload.message;
+    } else if (payload.type === "adminData") {
+      adminUnlocked = true;
+      adminOpen = true;
+      adminData = payload.data;
+      if (payload.message) toast = payload.message;
+    } else if (payload.type === "adminReplay") {
+      adminReplay = payload.replay;
+      replayFrameIndex = Math.max(0, payload.replay.frames.length - 1);
+      adminTab = "replay";
+      adminOpen = true;
+    } else if (payload.type === "adminError") {
       toast = payload.message;
     }
     render();
@@ -139,6 +165,9 @@ function renderBackTiles(count) {
 function renderMeld(meld) {
   if (meld.hidden) {
     const back = '<span class="meld-back tile-back" aria-hidden="true"></span>';
+    if (meld.type === "concealed-kong") {
+      return `<div class="meld meld-row meld-kong meld-hidden" aria-label="暗杠四张牌背">${meld.tiles.map(() => back).join("")}</div>`;
+    }
     return `<div class="meld meld-stacked meld-hidden" aria-label="暗置上摞">
       <span class="stack-tile stack-left">${back}</span>
       <span class="stack-tile stack-right">${back}</span>
@@ -147,7 +176,8 @@ function renderMeld(meld) {
   }
   const instances = meld.tiles.map((tile, index) => ({ tile, tileId: meld.tileIds?.[index] || `${meld.id}-${index}` }));
   if (!meld.stacked) {
-    return `<div class="meld meld-row" aria-label="碰牌 ${tileLabels[meld.tiles[0]]}">${instances.map((entry) => renderTile(entry, { size: "micro" })).join("")}</div>`;
+    const actionName = meld.type?.includes("kong") ? "杠牌" : "碰牌";
+    return `<div class="meld meld-row ${meld.type?.includes("kong") ? "meld-kong" : ""}" aria-label="${actionName} ${tileLabels[meld.tiles[0]]}">${instances.map((entry) => renderTile(entry, { size: "micro" })).join("")}</div>`;
   }
   const centerIndex = Math.max(0, meld.tiles.indexOf(meld.centerTile));
   const upper = instances[centerIndex];
@@ -166,8 +196,8 @@ function renderMelds(melds) {
 function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
-      <div class="brand-mark">${renderTile("C")}</div>
-      <div><p class="eyebrow">东光规则 · v2.2</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
+      <div><p class="eyebrow">东光规则 · v2.3</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -182,19 +212,20 @@ function renderLobby() {
         <button type="submit">加入房间</button>
       </div>
     </form>
-  </section>`;
+  </section>${renderAdminLayer()}`;
 
   app.querySelector("#nameInput").addEventListener("input", (event) => {
     name = event.target.value.trim() || "玩家";
     localStorage.setItem("majiang:name", name);
   });
-  app.querySelector("#soloBtn").addEventListener("click", () => send({ type: "create", mode: "solo", name }));
-  app.querySelector("#createBtn").addEventListener("click", () => send({ type: "create", mode: "online", name }));
+  app.querySelector("#soloBtn").addEventListener("click", () => send({ type: "create", mode: "solo", name, profileId }));
+  app.querySelector("#createBtn").addEventListener("click", () => send({ type: "create", mode: "online", name, profileId }));
   app.querySelector("#lobbyForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const roomId = app.querySelector("#roomInput").value.trim().toUpperCase();
-    if (roomId) send({ type: "join", roomId, name });
+    if (roomId) send({ type: "join", roomId, name, profileId });
   });
+  bindAdminEvents();
 }
 
 function renderGame() {
@@ -202,7 +233,7 @@ function renderGame() {
   app.innerHTML = `<section class="game layout-${layoutMode}">
     <header class="gamebar">
       <div class="game-identity">
-        <span class="mini-mark">${renderTile("C", { size: "micro" })}</span>
+        <button class="mini-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C", { size: "micro" })}</button>
         <div><strong>青桌麻将</strong><small>${state.mode === "solo" ? "单人局" : `房间 ${state.roomId}`} · v${state.version}</small></div>
       </div>
       <div class="round-stats"><span>余牌 <b>${state.wallCount}</b></span><span>${connection}</span></div>
@@ -238,7 +269,7 @@ function renderGame() {
       ${renderHand(self)}
       <div class="tile-preview ${selectedTileId ? "is-visible" : ""}" aria-hidden="${!selectedTileId}">${renderSelectedPreview(self)}</div>
     </section>
-  </section>`;
+  </section>${renderAdminLayer()}`;
   bindGameEvents();
 }
 
@@ -253,6 +284,111 @@ function renderHand(self) {
 function renderSelectedPreview(self) {
   const entry = self.hand?.find((tile) => tile.tileId === selectedTileId);
   return entry ? `${renderTile(entry, { size: "preview-size" })}<span>再次点击打出</span>` : "";
+}
+
+function numberField(label, key, value, group = "root", note = "") {
+  return `<label class="admin-number"><span>${label}${note ? `<small>${note}</small>` : ""}</span><input type="number" min="0" max="999" inputmode="numeric" data-score-group="${group}" data-score-key="${key}" value="${Number(value) || 0}" /></label>`;
+}
+
+function renderAdminScoring() {
+  const scoring = adminData.scoring;
+  const patterns = ["清一色", "七对", "豪华七对", "一条龙", "十三不靠", "十三幺", "三碰胡", "四碰胡", "钻胡", "杠上开花"];
+  return `<form class="admin-form" id="adminScoringForm">
+    <section class="admin-section"><h3>基础结算</h3><div class="admin-number-grid">
+      ${numberField("庄家底分", "dealerBase", scoring.dealerBase)}
+      ${numberField("闲家底分", "nonDealerBase", scoring.nonDealerBase)}
+      ${numberField("自摸倍数", "selfDrawMultiplier", scoring.selfDrawMultiplier)}
+      ${numberField("点炮包付倍数", "discardMultiplier", scoring.discardMultiplier)}
+    </div></section>
+    <section class="admin-section"><h3>胡牌积分</h3><div class="admin-number-grid">${patterns.map((name) => numberField(name, name, scoring.patterns[name], "patterns")).join("")}</div></section>
+    <section class="admin-section"><h3>杠牌积分</h3><p class="admin-note">每次杠牌即时结算，其余三家各支付所填分值；填 0 表示只记录、不计分。</p><div class="admin-number-grid">
+      ${numberField("明杠", "明杠", scoring.actions["明杠"], "actions")}
+      ${numberField("暗杠", "暗杠", scoring.actions["暗杠"], "actions")}
+    </div></section>
+    <div class="admin-savebar"><button class="primary" type="submit">保存积分设置</button></div>
+  </form>`;
+}
+
+function renderReplayViewer() {
+  if (!adminReplay?.frames?.length) return "";
+  const frame = adminReplay.frames[replayFrameIndex] || adminReplay.frames[0];
+  return `<section class="replay-viewer">
+    <header><button type="button" data-close-replay aria-label="返回回放列表">‹</button><div><strong>${escapeHtml(adminReplay.roomId)} · 第 ${frame.step} 步</strong><small>${escapeHtml(frame.text)}</small></div><b>余牌 ${frame.wallCount}</b></header>
+    <div class="replay-table">${frame.players.map((player) => `<section class="replay-seat replay-seat-${player.seat}">
+      <div class="replay-player"><span class="wind">${player.wind}</span><strong>${escapeHtml(player.name)}</strong><em>${player.score}</em></div>
+      <div class="replay-melds">${player.melds.map((meld) => renderMeld({ ...meld, hidden: meld.type === "concealed-kong" || meld.type === "concealed-pong" || meld.type === "drill" })).join("")}</div>
+      <div class="replay-discards">${player.discards.map((entry) => renderTile(entry, { size: "micro" })).join("")}</div>
+    </section>`).join("")}</div>
+    <label class="replay-scrubber"><span>${replayFrameIndex + 1} / ${adminReplay.frames.length}</span><input type="range" min="0" max="${adminReplay.frames.length - 1}" value="${replayFrameIndex}" data-replay-frame /></label>
+  </section>`;
+}
+
+function renderAdminReplay() {
+  const records = adminData.replays || [];
+  return `<section class="admin-section replay-settings">
+    <label class="admin-toggle"><span><strong>记录牌局</strong><small>关闭后不再保存新牌局，已有回放保留。</small></span><input type="checkbox" data-replay-enabled ${adminData.replay.enabled ? "checked" : ""} /></label>
+  </section>${renderReplayViewer() || `<section class="admin-section"><h3>牌局回放</h3><div class="replay-list">${records.length ? records.map((replay) => `<button type="button" data-replay-id="${escapeHtml(replay.id)}"><span><strong>${escapeHtml(replay.roomId)} · ${escapeHtml(replay.players.join(" / "))}</strong><small>${new Date(replay.createdAt).toLocaleString()} · ${escapeHtml(replay.result)}</small></span><b>${replay.frameCount}步</b></button>`).join("") : '<p class="admin-empty">还没有保存的牌局回放。</p>'}</div></section>`}`;
+}
+
+function renderAdminPlayers() {
+  const players = adminData.players || [];
+  return `<section class="admin-section"><h3>真实玩家积分</h3><div class="player-admin-list">${players.length ? players.map((player) => `<form class="player-admin-row" data-player-form="${escapeHtml(player.id)}"><span><strong>${escapeHtml(player.name)}</strong><small>${new Date(player.updatedAt).toLocaleString()}</small></span><input type="number" value="${player.score}" data-player-score aria-label="${escapeHtml(player.name)}的积分" /><button type="submit">修改</button><button type="button" class="danger-quiet" data-reset-player="${escapeHtml(player.id)}">重置</button></form>`).join("") : '<p class="admin-empty">暂无真实玩家记录。</p>'}</div></section>`;
+}
+
+function renderAdminLayer() {
+  if (!adminOpen) return "";
+  if (!adminUnlocked || !adminData) {
+    return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
+  }
+  const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.3</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+    <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
+    <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
+    <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
+  </nav><div class="admin-body">${toast ? `<p class="toast admin-toast">${escapeHtml(toast)}</p>` : ""}${content}</div></section></div>`;
+}
+
+function handleAdminTrigger() {
+  const now = Date.now();
+  if (now - adminTapStartedAt > 4000) {
+    adminTapCount = 0;
+    adminTapStartedAt = now;
+  }
+  adminTapCount += 1;
+  if (adminTapCount < 6) return;
+  adminTapCount = 0;
+  adminOpen = true;
+  if (adminUnlocked) send({ type: "adminGet" });
+  else render();
+}
+
+function bindAdminEvents() {
+  app.querySelectorAll("[data-admin-trigger]").forEach((button) => button.addEventListener("click", handleAdminTrigger));
+  app.querySelector("[data-admin-close]")?.addEventListener("click", () => { adminOpen = false; adminReplay = null; toast = ""; render(); });
+  app.querySelector("#adminLoginForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    send({ type: "adminLogin", password: app.querySelector("#adminPassword").value });
+  });
+  app.querySelectorAll("[data-admin-tab]").forEach((button) => button.addEventListener("click", () => { adminTab = button.dataset.adminTab; adminReplay = null; toast = ""; render(); }));
+  app.querySelector("#adminScoringForm")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    const scoring = { patterns: {}, actions: {} };
+    event.currentTarget.querySelectorAll("[data-score-key]").forEach((input) => {
+      const group = input.dataset.scoreGroup;
+      if (group === "root") scoring[input.dataset.scoreKey] = Number(input.value);
+      else scoring[group][input.dataset.scoreKey] = Number(input.value);
+    });
+    send({ type: "adminUpdateScoring", scoring });
+  });
+  app.querySelector("[data-replay-enabled]")?.addEventListener("change", (event) => send({ type: "adminUpdateReplay", enabled: event.target.checked }));
+  app.querySelectorAll("[data-replay-id]").forEach((button) => button.addEventListener("click", () => send({ type: "adminGetReplay", replayId: button.dataset.replayId })));
+  app.querySelector("[data-close-replay]")?.addEventListener("click", () => { adminReplay = null; render(); });
+  app.querySelector("[data-replay-frame]")?.addEventListener("input", (event) => { replayFrameIndex = Number(event.target.value); render(); });
+  app.querySelectorAll("[data-player-form]").forEach((form) => form.addEventListener("submit", (event) => {
+    event.preventDefault();
+    send({ type: "adminUpdatePlayer", playerId: form.dataset.playerForm, score: Number(form.querySelector("[data-player-score]").value) });
+  }));
+  app.querySelectorAll("[data-reset-player]").forEach((button) => button.addEventListener("click", () => send({ type: "adminResetPlayer", playerId: button.dataset.resetPlayer })));
 }
 
 function renderSeat(player) {
@@ -301,6 +437,7 @@ function renderActions() {
   if (state.winner && state.viewerSeat === state.hostSeat) buttons.push('<button class="primary" type="button" data-action="restart">再来一局</button>');
   if (state.canSelfWin) buttons.push('<button class="win" type="button" data-action="selfWin">自摸</button>');
   if (state.canRon) buttons.push('<button class="win" type="button" data-action="ron">胡</button>');
+  if (state.canKong) buttons.push('<button class="call" type="button" data-action="kong">明杠</button>');
   if (state.canPong) buttons.push('<button class="call" type="button" data-action="pong">碰</button>');
   if (state.canPass) buttons.push('<button type="button" data-action="pass">过</button>');
   for (const option of state.drillOptions || []) {
@@ -308,6 +445,9 @@ function renderActions() {
   }
   for (const option of state.stackOptions || []) {
     buttons.push(`<button class="declare" type="button" data-declare-pung="${escapeHtml(option.key)}">${escapeHtml(option.label)}</button>`);
+  }
+  for (const option of state.concealedKongOptions || []) {
+    buttons.push(`<button class="declare kong" type="button" data-concealed-kong="${escapeHtml(option.key)}">${escapeHtml(option.label)}</button>`);
   }
   return buttons.length ? buttons.join("") : `<span class="action-idle">${state.winner ? "本局已结算" : "等待牌局动作"}</span>`;
 }
@@ -346,6 +486,7 @@ function centerText() {
 
 function handHint() {
   if (state.canRon) return "可以胡这张牌";
+  if (state.canKong) return "可以明杠这张牌";
   if (state.canPong) return "可以碰这张牌";
   if (state.canDiscard) return selectedTileId ? "再次点击选中的牌打出" : "选择一张牌";
   if (state.winner) return "本局结束";
@@ -388,6 +529,7 @@ function bindGameEvents() {
   app.querySelectorAll("[data-layout-mode]").forEach((button) => button.addEventListener("click", () => setLayoutMode(button.dataset.layoutMode)));
   app.querySelectorAll("[data-declare-drill]").forEach((button) => button.addEventListener("click", () => send({ type: "declareDrill", key: button.dataset.declareDrill })));
   app.querySelectorAll("[data-declare-pung]").forEach((button) => button.addEventListener("click", () => send({ type: "declarePung", key: button.dataset.declarePung })));
+  app.querySelectorAll("[data-concealed-kong]").forEach((button) => button.addEventListener("click", () => send({ type: "concealedKong", key: button.dataset.concealedKong })));
   app.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       const action = button.dataset.action;
@@ -399,11 +541,12 @@ function bindGameEvents() {
       }
       const messages = {
         leave: { type: "leave" }, addBots: { type: "addBots" }, start: { type: "start" }, restart: { type: "restart" },
-        selfWin: { type: "selfWin" }, ron: { type: "ron" }, pong: { type: "pong" }, pass: { type: "pass" }
+        selfWin: { type: "selfWin" }, ron: { type: "ron" }, pong: { type: "pong" }, kong: { type: "kong" }, pass: { type: "pass" }
       };
       if (messages[action]) send(messages[action]);
     });
   });
+  bindAdminEvents();
 }
 
 function render() {

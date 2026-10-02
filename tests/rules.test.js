@@ -12,6 +12,7 @@ const {
   hasOneDragon,
   evaluateWin,
   drillCompletionOptions,
+  concealedKongOptions,
   makePlayer,
   makeDeck,
   sortedPhysicalHand,
@@ -155,4 +156,30 @@ test("只有自摸第三张组成完整边或钻顺子后才能明示", () => {
 
   const openingSequence = playerWith(["m1", "m2", "m3", "p5"]);
   assert.equal(drillCompletionOptions(openingSequence).length, 0);
+});
+
+test("暗杠必须由手中四张相同牌组成", () => {
+  const player = playerWith(["m3", "m3", "m3", "m3", "p5"]);
+  assert.deepEqual(concealedKongOptions(player).map((option) => option.tile), ["m3"]);
+  player.hand.pop();
+  player.hand.pop();
+  assert.equal(concealedKongOptions(player).length, 0);
+});
+
+test("明杠和暗杠均按三碰四碰路线中的一组刻子计算", () => {
+  const hand = ["m1", "m1", "m1", "m2", "m3", "m4", "p5", "p5"];
+  const player = playerWith(hand, {
+    route: "pung",
+    melds: [
+      { type: "exposed-kong", tiles: ["E", "E", "E", "E"] },
+      { type: "concealed-kong", tiles: ["F", "F", "F", "F"] }
+    ]
+  });
+  assert.deepEqual(evaluateWin(player, hand).patterns, ["三碰胡"]);
+});
+
+test("暗杠对其他玩家显示四张牌背", () => {
+  const meld = { type: "concealed-kong", tiles: ["s8", "s8", "s8", "s8"], tileIds: ["a", "b", "c", "d"] };
+  assert.deepEqual(snapshotMeld(meld, false).tiles, [null, null, null, null]);
+  assert.deepEqual(snapshotMeld(meld, true).tiles, ["s8", "s8", "s8", "s8"]);
 });

@@ -5,6 +5,9 @@ const path = require("path");
 
 const PORT = Number(process.env.PORT || 3019);
 const PUBLIC_DIR = path.join(__dirname, "public");
+const DATA_DIR = path.join(__dirname, "data");
+const ADMIN_DATA_FILE = path.join(DATA_DIR, "admin-data.json");
+const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
 const rooms = new Map();
@@ -22,7 +25,7 @@ const tileTypes = (() => {
 const tileIndex = new Map(tileTypes.map((tile, index) => [tile, index]));
 const winds = ["东", "南", "西", "北"];
 const botNames = ["阿庄", "小竹", "南风", "青雀"];
-const patternPoints = {
+const defaultPatternPoints = {
   "清一色": 8,
   "七对": 4,
   "豪华七对": 6,
@@ -31,8 +34,57 @@ const patternPoints = {
   "十三幺": 13,
   "三碰胡": 4,
   "四碰胡": 8,
-  "钻胡": 6
+  "钻胡": 6,
+  "杠上开花": 0
 };
+
+const defaultAdminData = {
+  scoring: {
+    dealerBase: 2,
+    nonDealerBase: 1,
+    selfDrawMultiplier: 2,
+    discardMultiplier: 3,
+    patterns: defaultPatternPoints,
+    actions: { "明杠": 0, "暗杠": 0 }
+  },
+  replay: { enabled: true },
+  players: {},
+  replays: []
+};
+
+function clone(value) {
+  return JSON.parse(JSON.stringify(value));
+}
+
+function loadAdminData() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(ADMIN_DATA_FILE, "utf8"));
+    return {
+      ...clone(defaultAdminData),
+      ...saved,
+      scoring: {
+        ...clone(defaultAdminData.scoring),
+        ...(saved.scoring || {}),
+        patterns: { ...defaultPatternPoints, ...(saved.scoring?.patterns || {}) },
+        actions: { ...defaultAdminData.scoring.actions, ...(saved.scoring?.actions || {}) }
+      },
+      replay: { ...defaultAdminData.replay, ...(saved.replay || {}) },
+      players: saved.players || {},
+      replays: Array.isArray(saved.replays) ? saved.replays : []
+    };
+  } catch {
+    return clone(defaultAdminData);
+  }
+}
+
+const adminData = loadAdminData();
+
+function saveAdminData() {
+  fs.mkdirSync(DATA_DIR, { recursive: true });
+  const temporary = `${ADMIN_DATA_FILE}.tmp`;
+  fs.writeFileSync(temporary, JSON.stringify(adminData, null, 2), "utf8");
+  fs.renameSync(temporary, ADMIN_DATA_FILE);
+}
 
 function makeId(length = 6) {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -110,12 +162,13 @@ function sortedPhysicalHand(player) {
 }
 
 function snapshotMeld(meld, isOwner) {
-  const concealed = meld.type === "drill" || meld.type === "concealed-pong";
+  const concealed = meld.type === "drill" || meld.type === "concealed-pong" || meld.type === "concealed-kong";
   if (isOwner || !concealed) return { ...meld, hidden: false };
+  const tileCount = meld.tiles.length;
   return {
     ...meld,
-    tiles: [null, null, null],
-    tileIds: [null, null, null],
+    tiles: Array(tileCount).fill(null),
+    tileIds: Array(tileCount).fill(null),
     centerTile: null,
     hidden: true
   };
@@ -238,7 +291,8 @@ function hasOneDragon(tiles) {
 function evaluateWin(player, concealedHand) {
   const melds = player.melds || [];
   const shape = standardShape(concealedHand, melds.length);
-  const exposedTriplets = melds.filter((meld) => meld.type === "pong" || meld.type === "concealed-pong").length;
+  const tripletMeldTypes = new Set(["pong", "concealed-pong", "exposed-kong", "concealed-kong"]);
+  const exposedTriplets = melds.filter((meld) => tripletMeldTypes.has(meld.type)).length;
   const tripletCount = shape ? shape.triplets + exposedTriplets : 0;
   const allTiles = playerTiles(player, concealedHand);
 
@@ -324,21 +378,75 @@ function stackOptions(player) {
   return options;
 }
 
-function calculateResult(room, winnerSeat, method, winningTile, fromSeat) {
+function concealedKongOptions(player) {
+  if (!player) return [];
+  return tileTypes
+    .filter((tile) => countTile(player.hand, tile) === 4)
+    .map((tile) => ({ key: `concealed-kong:${tile}`, tile, label: `暗杠 · ${tileName(tile)}` }));
+}
+
+function settleKongPoints(room, winnerSeat, kind) {
+  const points = Number(adminData.scoring.actions[kind]) || 0;
+  if (!points) return;
+  const winner = room.seats[winnerSeat];
+  for (let seat = 0; seat < 4; seat += 1) {
+    if (seat === winnerSeat) continue;
+    room.seats[seat].score -= points;
+    room.seats[seat].roundDelta -= points;
+    winner.score += points;
+    winner.roundDelta += points;
+  }
+  persistHumanScores(room);
+  addLog(room, `${winner.name} ${kind}结算，每家支付${points}分。`);
+}
+
+function declareConcealedKong(room, seat, key) {
+  if (room.winner || room.phase !== "discard" || room.currentSeat !== seat) return false;
+  const player = room.seats[seat];
+  const option = concealedKongOptions(player).find((entry) => entry.key === key);
+  if (!option) return false;
+  const removed = removeHandTiles(player, [option.tile, option.tile, option.tile, option.tile]);
+  if (!removed) return false;
+  player.melds.push({
+    id: makeId(8),
+    type: "concealed-kong",
+    tiles: [option.tile, option.tile, option.tile, option.tile],
+    tileIds: removed.map((entry) => entry.tileId),
+    stacked: false,
+    fromSeat: seat
+  });
+  player.drawnTile = null;
+  player.drawnTileId = null;
+  player.lastDrawnTile = null;
+  player.drewAfterKong = false;
+  addLog(room, `${player.name} 明示暗杠，牌面保持隐藏。`);
+  settleKongPoints(room, seat, "暗杠");
+  drawForCurrent(room, true);
+  return true;
+}
+
+function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangShangKaiHua = false) {
   const winner = room.seats[winnerSeat];
   const evaluation = evaluateWin(winner, winner.hand);
-  const base = winnerSeat === 0 ? 2 : 1;
+  const scoring = adminData.scoring;
+  const base = winnerSeat === 0 ? scoring.dealerBase : scoring.nonDealerBase;
   const items = [{ name: winnerSeat === 0 ? "庄家底分" : "闲家底分", points: base }];
   let handPoints = base;
   for (const pattern of evaluation.patterns) {
-    const points = patternPoints[pattern] || 0;
+    const points = scoring.patterns[pattern] || 0;
     handPoints += points;
     items.push({ name: pattern, points });
+  }
+  if (gangShangKaiHua) {
+    const points = scoring.patterns["杠上开花"] || 0;
+    handPoints += points;
+    items.push({ name: "杠上开花", points });
+    evaluation.patterns.push("杠上开花");
   }
 
   let payment = handPoints;
   if (method === "自摸") {
-    payment *= 2;
+    payment *= scoring.selfDrawMultiplier;
     items.push({ name: "自摸翻倍", points: payment });
   }
 
@@ -351,7 +459,7 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat) {
     }
   } else {
     const payer = typeof fromSeat === "number" ? fromSeat : room.pendingClaim?.fromSeat;
-    const totalPayment = payment * 3;
+    const totalPayment = payment * scoring.discardMultiplier;
     deltas[payer] -= totalPayment;
     deltas[winnerSeat] += totalPayment;
     items.push({ name: "点炮包三家", points: totalPayment });
@@ -361,6 +469,7 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat) {
     room.seats[seat].score += deltas[seat];
     room.seats[seat].roundDelta = deltas[seat];
   }
+  persistHumanScores(room);
 
   return {
     winnerSeat,
@@ -379,6 +488,7 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat) {
 function makePlayer({ id, name, isBot }) {
   return {
     id,
+    profileId: null,
     name,
     isBot,
     connected: true,
@@ -391,6 +501,7 @@ function makePlayer({ id, name, isBot }) {
     drawnTile: null,
     drawnTileId: null,
     lastDrawnTile: null,
+    drewAfterKong: false,
     route: null,
     stackWindowMeldId: null,
     pungRouteClosed: false,
@@ -415,6 +526,8 @@ function createRoom(hostClient, mode) {
     pendingClaim: null,
     log: [],
     logSequence: 0,
+    replayFrames: [],
+    replaySaved: false,
     timer: null
   };
   rooms.set(id, room);
@@ -439,6 +552,15 @@ function sitClient(room, client, preferredSeat = -1) {
     name: client.name || `玩家${seat + 1}`,
     isBot: false
   });
+  room.seats[seat].profileId = client.profileId;
+  if (client.profileId) {
+    const profile = adminData.players[client.profileId] || { name: room.seats[seat].name, score: 0, updatedAt: Date.now() };
+    profile.name = room.seats[seat].name;
+    profile.updatedAt = Date.now();
+    adminData.players[client.profileId] = profile;
+    room.seats[seat].score = Number(profile.score) || 0;
+    saveAdminData();
+  }
   client.roomId = room.id;
   client.seat = seat;
   addLog(room, `${room.seats[seat].name} 坐到了${windName(seat)}位。`);
@@ -468,6 +590,8 @@ function startGame(room) {
   clearRoomTimer(room);
   room.log = [];
   room.logSequence = 0;
+  room.replayFrames = [];
+  room.replaySaved = false;
   room.wall = makeDeck();
   room.currentSeat = 0;
   room.phase = "playing";
@@ -483,6 +607,7 @@ function startGame(room) {
     seat.drawnTile = null;
     seat.drawnTileId = null;
     seat.lastDrawnTile = null;
+    seat.drewAfterKong = false;
     seat.route = null;
     seat.stackWindowMeldId = null;
     seat.pungRouteClosed = false;
@@ -500,7 +625,7 @@ function startGame(room) {
   drawForCurrent(room);
 }
 
-function drawForCurrent(room) {
+function drawForCurrent(room, afterKong = false) {
   if (room.winner) return;
   const player = room.seats[room.currentSeat];
   const instance = room.wall.pop();
@@ -509,6 +634,7 @@ function drawForCurrent(room) {
     room.winner = { type: "draw", text: "荒庄，牌墙摸完了。" };
     room.roundResult = { text: "荒庄，本局不结算。", deltas: [0, 0, 0, 0], items: [] };
     addLog(room, room.winner.text);
+    finalizeReplay(room);
     broadcastRoom(room);
     return;
   }
@@ -517,13 +643,14 @@ function drawForCurrent(room) {
   player.drawnTile = instance.tile;
   player.drawnTileId = instance.tileId;
   player.lastDrawnTile = instance.tile;
+  player.drewAfterKong = afterKong;
   player.stackWindowMeldId = null;
   room.phase = "discard";
-  addLog(room, `${player.name} 摸牌。`);
+  addLog(room, `${player.name}${afterKong ? " 杠后补牌。" : " 摸牌。"}`);
 
   if (player.isBot) makeBotDeclarations(room, room.currentSeat);
   if (evaluateWin(player, player.hand).valid && player.isBot) {
-    endWithWinner(room, room.currentSeat, "自摸", player.lastDrawnTile, null);
+    endWithWinner(room, room.currentSeat, "自摸", player.lastDrawnTile, null, player.drewAfterKong);
     return;
   }
 
@@ -652,7 +779,15 @@ function offerPongClaim(room, fromSeat, tile, tileId = room.lastDiscard?.tileId)
   const nearest = sortedResponders(fromSeat, responders)[0];
   if (nearest !== undefined) {
     room.phase = "claim";
-    room.pendingClaim = { stage: "pong", tile, tileId, fromSeat, responders: [nearest], passed: [] };
+    room.pendingClaim = {
+      stage: "pong",
+      tile,
+      tileId,
+      fromSeat,
+      responders: [nearest],
+      passed: [],
+      kongResponders: countTile(room.seats[nearest].hand, tile) >= 3 ? [nearest] : []
+    };
     broadcastRoom(room);
     scheduleBotClaim(room);
     return;
@@ -668,6 +803,7 @@ function scheduleBotClaim(room) {
   room.timer = setTimeout(() => {
     if (!room.pendingClaim || !room.pendingClaim.responders.includes(botSeat)) return;
     if (room.pendingClaim.stage === "ron") claimRon(room, botSeat);
+    else if (claim.kongResponders?.includes(botSeat) && Math.random() < 0.32) claimKong(room, botSeat);
     else if (room.seats[botSeat].route !== "drill" && Math.random() < 0.72) claimPong(room, botSeat);
     else passClaim(room, botSeat);
   }, 360 + Math.random() * 320);
@@ -724,6 +860,35 @@ function claimPong(room, seat) {
   return true;
 }
 
+function claimKong(room, seat) {
+  const claim = room.pendingClaim;
+  if (!claim || claim.stage !== "pong" || !claim.kongResponders?.includes(seat)) return false;
+  const player = room.seats[seat];
+  const removed = removeHandTiles(player, [claim.tile, claim.tile, claim.tile]);
+  if (!removed) return false;
+  const discarder = room.seats[claim.fromSeat];
+  if (discarder.discards.at(-1)?.tileId === claim.tileId) discarder.discards.pop();
+  player.melds.push({
+    id: makeId(8),
+    type: "exposed-kong",
+    tiles: [claim.tile, claim.tile, claim.tile, claim.tile],
+    tileIds: [...removed.map((entry) => entry.tileId), claim.tileId],
+    stacked: false,
+    fromSeat: claim.fromSeat
+  });
+  player.drawnTile = null;
+  player.drawnTileId = null;
+  player.lastDrawnTile = null;
+  room.currentSeat = seat;
+  room.phase = "discard";
+  room.pendingClaim = null;
+  room.lastDiscard = null;
+  addLog(room, `${player.name} 明杠了${tileName(claim.tile)}，四张牌亮出。`);
+  settleKongPoints(room, seat, "明杠");
+  drawForCurrent(room, true);
+  return true;
+}
+
 function claimRon(room, seat) {
   const claim = room.pendingClaim;
   if (!claim || claim.stage !== "ron" || !claim.responders.includes(seat)) return false;
@@ -742,7 +907,7 @@ function nextTurn(room) {
   drawForCurrent(room);
 }
 
-function endWithWinner(room, seat, method, winningTile, fromSeat) {
+function endWithWinner(room, seat, method, winningTile, fromSeat, gangShangKaiHua = false) {
   const player = room.seats[seat];
   if (!evaluateWin(player, player.hand).valid) return false;
   clearRoomTimer(room);
@@ -752,9 +917,10 @@ function endWithWinner(room, seat, method, winningTile, fromSeat) {
     seatPlayer.drawnTile = null;
     seatPlayer.drawnTileId = null;
   }
-  room.roundResult = calculateResult(room, seat, method, winningTile, fromSeat);
+  room.roundResult = calculateResult(room, seat, method, winningTile, fromSeat, gangShangKaiHua);
   room.winner = { seat, name: player.name, method, text: `${player.name} ${method}胡牌！` };
   addLog(room, room.roundResult.text);
+  finalizeReplay(room);
   broadcastRoom(room);
   return true;
 }
@@ -764,7 +930,7 @@ function botDiscard(room) {
   const player = room.seats[room.currentSeat];
   if (!player || !player.isBot) return;
   if (evaluateWin(player, player.hand).valid) {
-    endWithWinner(room, room.currentSeat, "自摸", player.lastDrawnTile, null);
+    endWithWinner(room, room.currentSeat, "自摸", player.lastDrawnTile, null, player.drewAfterKong);
     return;
   }
   const tile = chooseBotDiscard(player);
@@ -795,6 +961,69 @@ function chooseBotDiscard(player) {
 function addLog(room, text) {
   room.logSequence = (room.logSequence || 0) + 1;
   room.log.unshift({ step: room.logSequence, time: Date.now(), text });
+  if (adminData.replay.enabled) captureReplayFrame(room, text);
+}
+
+function captureReplayFrame(room, text) {
+  room.replayFrames ||= [];
+  room.replayFrames.push({
+    step: room.logSequence,
+    time: Date.now(),
+    text,
+    phase: room.phase,
+    currentSeat: room.currentSeat,
+    wallCount: room.wall.length,
+    latestDiscardTileId: room.lastDiscard?.tileId || null,
+    players: room.seats.filter(Boolean).map((player, seat) => ({
+      seat,
+      wind: windName(seat),
+      name: player.name,
+      score: player.score,
+      hand: sortedPhysicalHand(player),
+      discards: clone(player.discards),
+      melds: clone(player.melds),
+      routeLabel: routeLabel(player)
+    }))
+  });
+}
+
+function finalizeReplay(room) {
+  if (!adminData.replay.enabled || room.replaySaved || !room.replayFrames?.length) return;
+  room.replaySaved = true;
+  adminData.replays.unshift({
+    id: `${room.id}-${Date.now()}`,
+    roomId: room.id,
+    mode: room.mode,
+    createdAt: Date.now(),
+    result: room.roundResult?.text || room.winner?.text || "牌局结束",
+    players: room.seats.filter(Boolean).map((player) => player.name),
+    frames: room.replayFrames
+  });
+  adminData.replays = adminData.replays.slice(0, 20);
+  saveAdminData();
+}
+
+function persistHumanScores(room) {
+  let changed = false;
+  for (const player of room.seats) {
+    if (!player || player.isBot || !player.profileId) continue;
+    adminData.players[player.profileId] = {
+      name: player.name,
+      score: player.score,
+      updatedAt: Date.now()
+    };
+    changed = true;
+  }
+  if (changed) saveAdminData();
+}
+
+function publicAdminData() {
+  return {
+    scoring: clone(adminData.scoring),
+    replay: clone(adminData.replay),
+    players: Object.entries(adminData.players).map(([id, player]) => ({ id, ...player })),
+    replays: adminData.replays.map(({ frames, ...replay }) => ({ ...replay, frameCount: frames.length }))
+  };
 }
 
 function windName(seat) {
@@ -855,7 +1084,7 @@ function roomSnapshot(room, viewerSeat) {
   const isResponder = Boolean(claim && claim.responders.includes(viewerSeat) && !claim.passed.includes(viewerSeat));
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   return {
-    version: "2.2",
+    version: "2.3",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat && seat.id === room.hostId),
@@ -871,9 +1100,11 @@ function roomSnapshot(room, viewerSeat) {
     roundResult: room.roundResult,
     canRon: isResponder && claim.stage === "ron",
     canPong: isResponder && claim.stage === "pong",
+    canKong: isResponder && claim.stage === "pong" && claim.kongResponders?.includes(viewerSeat),
     canPass: isResponder,
     canDiscard: viewerTurn,
     canSelfWin: viewerTurn && evaluateWin(viewer, viewer?.hand || []).valid,
+    concealedKongOptions: viewerTurn ? concealedKongOptions(viewer) : [],
     drillOptions: viewerTurn ? drillCompletionOptions(viewer) : [],
     stackOptions: !room.winner && room.phase !== "waiting" ? stackOptions(viewer) : [],
     players: room.seats.map((seat, index) => seat ? {
@@ -893,6 +1124,75 @@ function roomSnapshot(room, viewerSeat) {
     } : null),
     log: room.log
   };
+}
+
+function passwordMatches(value) {
+  if (!ADMIN_PASSWORD) return false;
+  const supplied = Buffer.from(String(value || ""));
+  const expected = Buffer.from(ADMIN_PASSWORD);
+  return supplied.length === expected.length && crypto.timingSafeEqual(supplied, expected);
+}
+
+function numericSetting(value, fallback, minimum = 0, maximum = 999) {
+  const number = Number(value);
+  return Number.isFinite(number) ? Math.min(maximum, Math.max(minimum, Math.round(number))) : fallback;
+}
+
+function handleAdminMessage(client, data) {
+  if (data.type === "adminLogin") {
+    if (!passwordMatches(data.password)) {
+      sendJson(client.socket, { type: "adminError", message: "管理者密码不正确。" });
+      return true;
+    }
+    client.adminAuthenticated = true;
+    sendJson(client.socket, { type: "adminData", data: publicAdminData() });
+    return true;
+  }
+  if (!String(data.type || "").startsWith("admin")) return false;
+  if (!client.adminAuthenticated) {
+    sendJson(client.socket, { type: "adminError", message: "管理者身份已失效，请重新输入密码。" });
+    return true;
+  }
+  if (data.type === "adminGet") {
+    sendJson(client.socket, { type: "adminData", data: publicAdminData() });
+  } else if (data.type === "adminUpdateScoring") {
+    const incoming = data.scoring || {};
+    adminData.scoring.dealerBase = numericSetting(incoming.dealerBase, adminData.scoring.dealerBase);
+    adminData.scoring.nonDealerBase = numericSetting(incoming.nonDealerBase, adminData.scoring.nonDealerBase);
+    adminData.scoring.selfDrawMultiplier = numericSetting(incoming.selfDrawMultiplier, adminData.scoring.selfDrawMultiplier, 1, 20);
+    adminData.scoring.discardMultiplier = numericSetting(incoming.discardMultiplier, adminData.scoring.discardMultiplier, 1, 20);
+    for (const key of Object.keys(defaultPatternPoints)) {
+      adminData.scoring.patterns[key] = numericSetting(incoming.patterns?.[key], adminData.scoring.patterns[key]);
+    }
+    for (const key of ["明杠", "暗杠"]) {
+      adminData.scoring.actions[key] = numericSetting(incoming.actions?.[key], adminData.scoring.actions[key]);
+    }
+    saveAdminData();
+    sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "积分设置已保存。" });
+  } else if (data.type === "adminUpdateReplay") {
+    adminData.replay.enabled = Boolean(data.enabled);
+    saveAdminData();
+    sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "回放设置已保存。" });
+  } else if (data.type === "adminGetReplay") {
+    const replay = adminData.replays.find((entry) => entry.id === data.replayId);
+    sendJson(client.socket, replay ? { type: "adminReplay", replay } : { type: "adminError", message: "没有找到这局回放。" });
+  } else if (data.type === "adminUpdatePlayer" || data.type === "adminResetPlayer") {
+    const player = adminData.players[String(data.playerId || "")];
+    if (!player) {
+      sendJson(client.socket, { type: "adminError", message: "没有找到这个真实玩家。" });
+      return true;
+    }
+    player.score = data.type === "adminResetPlayer" ? 0 : numericSetting(data.score, player.score, -999999, 999999);
+    player.updatedAt = Date.now();
+    for (const room of rooms.values()) {
+      const seated = room.seats.find((entry) => entry?.profileId === data.playerId && !entry.isBot);
+      if (seated) seated.score = player.score;
+      if (seated) broadcastRoom(room);
+    }
+    saveAdminData();
+    sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "玩家积分已更新。" });
+  }
+  return true;
 }
 
 function broadcastRoom(room) {
@@ -947,13 +1247,16 @@ function handleMessage(client, message) {
   }
 
   try {
+    if (handleAdminMessage(client, data)) return;
     if (data.type === "create") {
       client.name = String(data.name || "玩家").slice(0, 12);
+      client.profileId = String(data.profileId || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 64) || client.id;
       createRoom(client, data.mode === "solo" ? "solo" : "online");
       return;
     }
     if (data.type === "join") {
       client.name = String(data.name || "玩家").slice(0, 12);
+      client.profileId = String(data.profileId || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 64) || client.id;
       const room = rooms.get(String(data.roomId || "").trim().toUpperCase());
       if (!room) return sendJson(client.socket, { type: "error", message: "没有找到这个房间。" });
       if (room.phase !== "waiting") return sendJson(client.socket, { type: "error", message: "牌局已经开始。" });
@@ -980,12 +1283,17 @@ function handleMessage(client, message) {
       declareCompletedDrill(room, client.seat, String(data.key || ""));
     } else if (data.type === "declarePung") {
       declarePungStack(room, client.seat, String(data.key || ""));
+    } else if (data.type === "concealedKong") {
+      declareConcealedKong(room, client.seat, String(data.key || ""));
     } else if (data.type === "selfWin" && room.currentSeat === client.seat) {
-      endWithWinner(room, client.seat, "自摸", room.seats[client.seat].lastDrawnTile, null);
+      const player = room.seats[client.seat];
+      endWithWinner(room, client.seat, "自摸", player.lastDrawnTile, null, player.drewAfterKong);
     } else if (data.type === "ron") {
       claimRon(room, client.seat);
     } else if (data.type === "pong") {
       claimPong(room, client.seat);
+    } else if (data.type === "kong") {
+      claimKong(room, client.seat);
     } else if (data.type === "pass") {
       passClaim(room, client.seat);
     } else if (data.type === "restart" && client.id === room.hostId) {
@@ -1051,7 +1359,10 @@ server.on("upgrade", (req, socket) => {
     ""
   ].join("\r\n"));
 
-  const client = { id: crypto.randomUUID(), socket, name: "玩家", roomId: null, seat: -1 };
+  const client = {
+    id: crypto.randomUUID(), socket, name: "玩家", profileId: null,
+    roomId: null, seat: -1, adminAuthenticated: false
+  };
   clients.set(client.id, client);
   socket.on("data", (buffer) => {
     const frame = parseFrame(buffer);
@@ -1092,5 +1403,6 @@ module.exports = {
   hasOneDragon,
   evaluateWin,
   drillCompletionOptions,
+  concealedKongOptions,
   makePlayer
 };
