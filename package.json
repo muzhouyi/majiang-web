@@ -1,12 +1,13 @@
 {
   "name": "majiang-web",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "private": true,
   "description": "A browser-playable Mahjong game with solo bot play and online rooms.",
   "type": "commonjs",
   "scripts": {
     "start": "node server.js",
-    "dev": "node server.js"
+    "dev": "node server.js",
+    "test": "node --test tests/*.test.js"
   },
   "engines": {
     "node": ">=18"

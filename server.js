@@ -13,7 +13,7 @@ const clients = new Map();
 const tileTypes = (() => {
   const tiles = [];
   for (const suit of ["m", "p", "s"]) {
-    for (let n = 1; n <= 9; n += 1) tiles.push(`${suit}${n}`);
+    for (let number = 1; number <= 9; number += 1) tiles.push(`${suit}${number}`);
   }
   for (const honor of ["E", "S", "W", "N", "C", "F", "P"]) tiles.push(honor);
   return tiles;
@@ -22,11 +22,24 @@ const tileTypes = (() => {
 const tileIndex = new Map(tileTypes.map((tile, index) => [tile, index]));
 const winds = ["东", "南", "西", "北"];
 const botNames = ["阿庄", "小竹", "南风", "青雀"];
+const patternPoints = {
+  "清一色": 8,
+  "七对": 4,
+  "豪华七对": 6,
+  "一条龙": 4,
+  "十三不靠": 8,
+  "十三幺": 13,
+  "三碰胡": 4,
+  "四碰胡": 8,
+  "钻胡": 6
+};
 
 function makeId(length = 6) {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
   let id = "";
-  for (let i = 0; i < length; i += 1) id += alphabet[Math.floor(Math.random() * alphabet.length)];
+  for (let index = 0; index < length; index += 1) {
+    id += alphabet[Math.floor(Math.random() * alphabet.length)];
+  }
   return id;
 }
 
@@ -35,9 +48,9 @@ function makeDeck() {
   for (const tile of tileTypes) {
     for (let copy = 0; copy < 4; copy += 1) deck.push(tile);
   }
-  for (let i = deck.length - 1; i > 0; i -= 1) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [deck[i], deck[j]] = [deck[j], deck[i]];
+  for (let index = deck.length - 1; index > 0; index -= 1) {
+    const target = Math.floor(Math.random() * (index + 1));
+    [deck[index], deck[target]] = [deck[target], deck[index]];
   }
   return deck;
 }
@@ -52,36 +65,51 @@ function tileCounts(hand) {
   return counts;
 }
 
-function canWin(hand) {
-  return canStandardWin(hand) || isSevenPairs(hand) || isThirteenBuKaoLite(hand);
+function countTile(hand, tile) {
+  return hand.reduce((total, entry) => total + Number(entry === tile), 0);
 }
 
-function canStandardWin(hand) {
-  if (hand.length % 3 !== 2) return false;
-  const counts = tileCounts(hand);
-  for (let i = 0; i < counts.length; i += 1) {
-    if (counts[i] < 2) continue;
-    counts[i] -= 2;
-    if (canFormSets(counts)) {
-      counts[i] += 2;
-      return true;
-    }
-    counts[i] += 2;
+function hasTiles(hand, tiles) {
+  const available = new Map();
+  for (const tile of hand) available.set(tile, (available.get(tile) || 0) + 1);
+  for (const tile of tiles) {
+    const count = available.get(tile) || 0;
+    if (!count) return false;
+    available.set(tile, count - 1);
   }
-  return false;
+  return true;
 }
 
-function canFormSets(counts) {
-  const first = counts.findIndex((count) => count > 0);
-  if (first === -1) return true;
+function removeTiles(hand, tiles) {
+  for (const tile of tiles) {
+    const index = hand.indexOf(tile);
+    if (index === -1) return false;
+    hand.splice(index, 1);
+  }
+  return true;
+}
 
+function tileName(tile) {
+  if (!tile) return "";
+  const numbers = ["", "一", "二", "三", "四", "五", "六", "七", "八", "九"];
+  const honors = { E: "东风", S: "南风", W: "西风", N: "北风", C: "红中", F: "发财", P: "白板" };
+  if (tile.startsWith("m")) return `${numbers[Number(tile[1])]}万`;
+  if (tile.startsWith("p")) return `${numbers[Number(tile[1])]}筒`;
+  if (tile.startsWith("s")) return `${numbers[Number(tile[1])]}条`;
+  return honors[tile] || tile;
+}
+
+function bestSetShape(counts, setsLeft) {
+  const first = counts.findIndex((count) => count > 0);
+  if (setsLeft === 0) return first === -1 ? { triplets: 0 } : null;
+  if (first === -1) return null;
+
+  let best = null;
   if (counts[first] >= 3) {
     counts[first] -= 3;
-    if (canFormSets(counts)) {
-      counts[first] += 3;
-      return true;
-    }
+    const rest = bestSetShape(counts, setsLeft - 1);
     counts[first] += 3;
+    if (rest) best = { triplets: rest.triplets + 1 };
   }
 
   const tile = tileTypes[first];
@@ -94,122 +122,214 @@ function canFormSets(counts) {
       counts[first] -= 1;
       counts[second] -= 1;
       counts[third] -= 1;
-      if (canFormSets(counts)) {
-        counts[first] += 1;
-        counts[second] += 1;
-        counts[third] += 1;
-        return true;
-      }
+      const rest = bestSetShape(counts, setsLeft - 1);
       counts[first] += 1;
       counts[second] += 1;
       counts[third] += 1;
+      if (rest && (!best || rest.triplets > best.triplets)) best = rest;
     }
   }
-  return false;
+  return best;
+}
+
+function standardShape(hand, meldCount = 0) {
+  const setsNeeded = 4 - meldCount;
+  if (setsNeeded < 0 || hand.length !== setsNeeded * 3 + 2) return null;
+  const counts = tileCounts(hand);
+  let best = null;
+  for (let index = 0; index < counts.length; index += 1) {
+    if (counts[index] < 2) continue;
+    counts[index] -= 2;
+    const sets = bestSetShape(counts, setsNeeded);
+    counts[index] += 2;
+    if (sets && (!best || sets.triplets > best.triplets)) {
+      best = { pair: tileTypes[index], triplets: sets.triplets };
+    }
+  }
+  return best;
 }
 
 function isSevenPairs(hand) {
   if (hand.length !== 14) return false;
-  return tileCounts(hand).every((count) => count === 0 || count === 2 || count === 4);
+  const counts = tileCounts(hand);
+  return counts.every((count) => count === 0 || count === 2 || count === 4)
+    && counts.reduce((pairs, count) => pairs + count / 2, 0) === 7;
 }
 
 function isLuxurySevenPairs(hand) {
   return isSevenPairs(hand) && tileCounts(hand).some((count) => count === 4);
 }
 
-function isThirteenBuKaoLite(hand) {
+function isThirteenBuKao(hand) {
+  if (hand.length !== 14 || new Set(hand).size !== 14) return false;
+  for (const suit of ["m", "p", "s"]) {
+    const numbers = hand
+      .filter((tile) => tile.startsWith(suit))
+      .map((tile) => Number(tile[1]))
+      .sort((a, b) => a - b);
+    for (let index = 1; index < numbers.length; index += 1) {
+      if (numbers[index] - numbers[index - 1] < 3) return false;
+    }
+  }
+  return true;
+}
+
+function isThirteenOrphans(hand) {
   if (hand.length !== 14) return false;
   const required = ["m1", "m9", "p1", "p9", "s1", "s9", "E", "S", "W", "N", "C", "F", "P"];
   const counts = tileCounts(hand);
-  const hasAll = required.every((tile) => counts[tileIndex.get(tile)] >= 1);
-  const pairCount = counts.filter((count) => count === 2).length;
-  const overCount = counts.some((count) => count > 2);
-  return hasAll && pairCount === 1 && !overCount;
+  if (!required.every((tile) => counts[tileIndex.get(tile)] >= 1)) return false;
+  if (hand.some((tile) => !required.includes(tile))) return false;
+  return required.filter((tile) => counts[tileIndex.get(tile)] === 2).length === 1
+    && !counts.some((count) => count > 2);
 }
 
-function isPureOneSuit(hand) {
-  const suited = hand.filter((tile) => ["m", "p", "s"].includes(tile[0]));
-  if (!suited.length || suited.length !== hand.length) return false;
-  return new Set(suited.map((tile) => tile[0])).size === 1;
+function playerTiles(player, concealedHand = player.hand) {
+  return [...concealedHand, ...(player.melds || []).flatMap((meld) => meld.tiles)];
 }
 
-function hasOneDragon(hand) {
-  for (const suit of ["m", "p", "s"]) {
-    let ok = true;
-    for (let n = 1; n <= 9; n += 1) {
-      if (!hand.includes(`${suit}${n}`)) ok = false;
+function isPureOneSuit(tiles) {
+  return tiles.length > 0
+    && tiles.every((tile) => ["m", "p", "s"].includes(tile[0]))
+    && new Set(tiles.map((tile) => tile[0])).size === 1;
+}
+
+function hasOneDragon(tiles) {
+  return ["m", "p", "s"].some((suit) => {
+    for (let number = 1; number <= 9; number += 1) {
+      if (!tiles.includes(`${suit}${number}`)) return false;
     }
-    if (ok) return true;
-  }
-  return false;
+    return true;
+  });
 }
 
-function isAllTriplets(hand) {
-  if (!canStandardWin(hand)) return false;
-  const counts = tileCounts(hand);
-  let pairs = 0;
-  for (const count of counts) {
-    if (count === 1) return false;
-    if (count === 2) pairs += 1;
+function evaluateWin(player, concealedHand) {
+  const melds = player.melds || [];
+  const shape = standardShape(concealedHand, melds.length);
+  const exposedTriplets = melds.filter((meld) => meld.type === "pong" || meld.type === "concealed-pong").length;
+  const tripletCount = shape ? shape.triplets + exposedTriplets : 0;
+  const allTiles = playerTiles(player, concealedHand);
+
+  if (player.route === "drill") {
+    const drillCount = melds.filter((meld) => meld.type === "drill").length;
+    return {
+      valid: Boolean(shape && drillCount >= 3),
+      patterns: drillCount >= 3 ? ["钻胡"] : [],
+      tripletCount,
+      drillCount
+    };
   }
-  return pairs === 1;
+
+  if (player.route === "pung") {
+    const pungName = tripletCount >= 4 ? "四碰胡" : "三碰胡";
+    return {
+      valid: Boolean(shape && tripletCount >= 3),
+      patterns: tripletCount >= 3 ? [pungName] : [],
+      tripletCount,
+      drillCount: 0
+    };
+  }
+
+  const noMelds = melds.length === 0;
+  const sevenPairs = noMelds && isSevenPairs(concealedHand);
+  const luxurySevenPairs = sevenPairs && isLuxurySevenPairs(concealedHand);
+  const thirteenBuKao = noMelds && isThirteenBuKao(concealedHand);
+  const thirteenOrphans = noMelds && isThirteenOrphans(concealedHand);
+  const valid = Boolean(shape || sevenPairs || thirteenBuKao || thirteenOrphans);
+  const patterns = [];
+  if (thirteenOrphans) patterns.push("十三幺");
+  else if (thirteenBuKao) patterns.push("十三不靠");
+  else if (luxurySevenPairs) patterns.push("豪华七对");
+  else if (sevenPairs) patterns.push("七对");
+  if (valid && isPureOneSuit(allTiles)) patterns.push("清一色");
+  if (valid && hasOneDragon(allTiles)) patterns.push("一条龙");
+  return { valid, patterns, tripletCount, drillCount: 0 };
 }
 
-function isTerminalEdgeWait(hand, winningTile) {
-  if (!winningTile || !["m", "p", "s"].includes(winningTile[0])) return false;
-  const suit = winningTile[0];
-  const number = Number(winningTile[1]);
-  const rest = [...hand];
-  const index = rest.indexOf(winningTile);
-  if (index >= 0) rest.splice(index, 1);
-  if (number === 3) return rest.includes(`${suit}1`) && rest.includes(`${suit}2`);
-  if (number === 7) return rest.includes(`${suit}8`) && rest.includes(`${suit}9`);
-  return false;
+function makeDrillOption(kind, pattern, waitingTile) {
+  const option = { kind, pattern, waitingTile };
+  option.key = `${kind}:${waitingTile}:${pattern.join(",")}`;
+  option.label = `${kind === "edge" ? "边" : "钻"} · 等${tileName(waitingTile)}`;
+  return option;
+}
+
+function drillWaitOptions(player) {
+  const drawnTile = player?.drawnTile;
+  if (!drawnTile || player.route === "pung" || player.activeDrillWait) return [];
+  if (!["m", "p", "s"].includes(drawnTile[0])) return [];
+
+  const suit = drawnTile[0];
+  const options = [];
+  const addWhenDrawMadePair = (kind, pattern, waitingTile) => {
+    const handBeforeDraw = [...player.hand];
+    handBeforeDraw.splice(handBeforeDraw.lastIndexOf(drawnTile), 1);
+    if (pattern.includes(drawnTile) && hasTiles(player.hand, pattern) && !hasTiles(handBeforeDraw, pattern)) {
+      options.push(makeDrillOption(kind, pattern, waitingTile));
+    }
+  };
+
+  addWhenDrawMadePair("edge", [`${suit}1`, `${suit}2`], `${suit}3`);
+  addWhenDrawMadePair("edge", [`${suit}8`, `${suit}9`], `${suit}7`);
+  for (let number = 1; number <= 7; number += 1) {
+    addWhenDrawMadePair("drill", [`${suit}${number}`, `${suit}${number + 2}`], `${suit}${number + 1}`);
+  }
+  return options;
+}
+
+function canCompleteDrill(player) {
+  const wait = player?.activeDrillWait;
+  return Boolean(wait
+    && player.drawnTile === wait.waitingTile
+    && hasTiles(player.hand, [...wait.pattern, wait.waitingTile]));
+}
+
+function stackOptions(player) {
+  if (!player || player.route === "drill") return [];
+  if (player.pungRouteClosed && !player.route) return [];
+  const options = [];
+  if (player.stackWindowMeldId) {
+    const meld = player.melds.find((entry) => entry.id === player.stackWindowMeldId && !entry.stacked);
+    if (meld) options.push({ key: `meld:${meld.id}`, tile: meld.tiles[0], label: `上摞 · ${tileName(meld.tiles[0])}` });
+  }
+  for (const tile of tileTypes) {
+    if (countTile(player.hand, tile) >= 3) {
+      options.push({ key: `concealed:${tile}`, tile, label: `上摞 · ${tileName(tile)}` });
+    }
+  }
+  return options;
 }
 
 function calculateResult(room, winnerSeat, method, winningTile, fromSeat) {
   const winner = room.seats[winnerSeat];
-  const hand = sortedHand(winner.hand);
+  const evaluation = evaluateWin(winner, winner.hand);
   const base = winnerSeat === 0 ? 2 : 1;
   const items = [{ name: winnerSeat === 0 ? "庄家底分" : "闲家底分", points: base }];
-  let bonus = 0;
-
-  function add(name, points) {
-    bonus += points;
-    items.push({ name, points });
+  let handPoints = base;
+  for (const pattern of evaluation.patterns) {
+    const points = patternPoints[pattern] || 0;
+    handPoints += points;
+    items.push({ name: pattern, points });
   }
 
-  if (isPureOneSuit(hand)) add("清一色", 8);
-  if (isLuxurySevenPairs(hand)) add("豪华七对", 6);
-  else if (isSevenPairs(hand)) add("七对", 4);
-  if (isAllTriplets(hand)) add("碰碰胡", 2);
-  if (hasOneDragon(hand)) add("一条龙", 4);
-  if (winningTile && ["m5", "p5", "s5"].includes(winningTile)) add("捉五魁", 2);
-  if (isTerminalEdgeWait(hand, winningTile)) {
-    add("三边/边张（暂定）", 4);
-    add("三钻（暂定）", 2);
-  }
-  if (isThirteenBuKaoLite(hand)) add("十三不靠（暂定）", 8);
-
-  let total = base + bonus;
+  let payment = handPoints;
   if (method === "自摸") {
-    total *= 2;
-    items.push({ name: "自摸翻番", points: total });
+    payment *= 2;
+    items.push({ name: "自摸翻倍", points: payment });
   }
 
   const deltas = [0, 0, 0, 0];
   if (method === "自摸") {
     for (let seat = 0; seat < 4; seat += 1) {
       if (seat === winnerSeat) continue;
-      deltas[seat] -= total;
-      deltas[winnerSeat] += total;
+      deltas[seat] -= payment;
+      deltas[winnerSeat] += payment;
     }
   } else {
-    const payer = typeof fromSeat === "number" ? fromSeat : room.pendingRon?.fromSeat;
-    const pay = total * 3;
-    deltas[payer] -= pay;
-    deltas[winnerSeat] += pay;
-    items.push({ name: "点炮包三家", points: pay });
+    const payer = typeof fromSeat === "number" ? fromSeat : room.pendingClaim?.fromSeat;
+    const totalPayment = payment * 3;
+    deltas[payer] -= totalPayment;
+    deltas[winnerSeat] += totalPayment;
+    items.push({ name: "点炮包三家", points: totalPayment });
   }
 
   for (let seat = 0; seat < 4; seat += 1) {
@@ -222,18 +342,39 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat) {
     fromSeat: method === "点炮" ? fromSeat : null,
     method,
     winningTile,
+    patterns: evaluation.patterns,
     base,
-    total,
+    payment,
     deltas,
     items,
-    text: `${winner.name} ${method}胡牌，结算 ${method === "自摸" ? total : total * 3} 分`
+    text: `${winner.name} ${method}胡牌，${evaluation.patterns.join("、") || "普通胡"}`
+  };
+}
+
+function makePlayer({ id, name, isBot }) {
+  return {
+    id,
+    name,
+    isBot,
+    connected: true,
+    score: 0,
+    roundDelta: 0,
+    hand: [],
+    discards: [],
+    melds: [],
+    drawnTile: null,
+    lastDrawnTile: null,
+    route: null,
+    activeDrillWait: null,
+    stackWindowMeldId: null,
+    pungRouteClosed: false,
+    ready: true
   };
 }
 
 function createRoom(hostClient, mode) {
   let id = makeId();
   while (rooms.has(id)) id = makeId();
-
   const room = {
     id,
     mode,
@@ -245,13 +386,12 @@ function createRoom(hostClient, mode) {
     lastDiscard: null,
     winner: null,
     roundResult: null,
-    pendingRon: null,
+    pendingClaim: null,
     log: [],
     timer: null
   };
   rooms.set(id, room);
   sitClient(room, hostClient, 0);
-
   if (mode === "solo") {
     fillBots(room);
     startGame(room);
@@ -267,18 +407,11 @@ function sitClient(room, client, preferredSeat = -1) {
     ? preferredSeat
     : room.seats.findIndex((entry) => !entry);
   if (seat === -1) throw new Error("房间已满");
-  room.seats[seat] = {
+  room.seats[seat] = makePlayer({
     id: client.id,
     name: client.name || `玩家${seat + 1}`,
-    isBot: false,
-    connected: true,
-    score: 0,
-    roundDelta: 0,
-    hand: [],
-    discards: [],
-    drawnTile: null,
-    ready: true
-  };
+    isBot: false
+  });
   client.roomId = room.id;
   client.seat = seat;
   addLog(room, `${room.seats[seat].name} 坐到了${windName(seat)}位。`);
@@ -288,18 +421,11 @@ function sitClient(room, client, preferredSeat = -1) {
 function fillBots(room) {
   for (let seat = 0; seat < 4; seat += 1) {
     if (!room.seats[seat]) {
-      room.seats[seat] = {
+      room.seats[seat] = makePlayer({
         id: `bot-${room.id}-${seat}`,
         name: botNames[seat],
-        isBot: true,
-        connected: true,
-        score: 0,
-        roundDelta: 0,
-        hand: [],
-        discards: [],
-        drawnTile: null,
-        ready: true
-      };
+        isBot: true
+      });
     }
   }
   addLog(room, "空位已由电脑玩家补齐。");
@@ -319,11 +445,17 @@ function startGame(room) {
   room.lastDiscard = null;
   room.winner = null;
   room.roundResult = null;
-  room.pendingRon = null;
+  room.pendingClaim = null;
   for (const seat of room.seats) {
     seat.hand = [];
     seat.discards = [];
+    seat.melds = [];
     seat.drawnTile = null;
+    seat.lastDrawnTile = null;
+    seat.route = null;
+    seat.activeDrillWait = null;
+    seat.stackWindowMeldId = null;
+    seat.pungRouteClosed = false;
     seat.roundDelta = 0;
   }
 
@@ -348,121 +480,297 @@ function drawForCurrent(room) {
   }
   player.hand.push(tile);
   player.drawnTile = tile;
+  player.lastDrawnTile = tile;
+  player.stackWindowMeldId = null;
   room.phase = "discard";
   room.lastDiscard = null;
   addLog(room, `${player.name} 摸牌。`);
 
-  if (canWin(player.hand) && player.isBot) {
-    endWithWinner(room, room.currentSeat, "自摸", tile, null);
+  if (player.isBot) makeBotDeclarations(room, room.currentSeat);
+  if (evaluateWin(player, player.hand).valid && player.isBot) {
+    endWithWinner(room, room.currentSeat, "自摸", player.lastDrawnTile, null);
     return;
   }
 
   broadcastRoom(room);
-  if (player.isBot) {
-    room.timer = setTimeout(() => botDiscard(room), 650 + Math.random() * 500);
+  if (player.isBot) room.timer = setTimeout(() => botDiscard(room), 420 + Math.random() * 360);
+}
+
+function makeBotDeclarations(room, seat) {
+  const player = room.seats[seat];
+  if (canCompleteDrill(player)) completeDrill(room, seat, true);
+
+  const drillOptions = drillWaitOptions(player);
+  if (drillOptions.length && (player.route === "drill" || (!player.route && Math.random() < 0.28))) {
+    declareDrillWait(room, seat, drillOptions[0].key, true);
   }
+
+  const concealedStack = stackOptions(player).find((option) => option.key.startsWith("concealed:"));
+  if (concealedStack && (player.route === "pung" || (!player.route && Math.random() < 0.18))) {
+    declarePungStack(room, seat, concealedStack.key, true);
+  }
+}
+
+function declareDrillWait(room, seat, key, silent = false) {
+  if (room.winner || room.phase !== "discard" || room.currentSeat !== seat) return false;
+  const player = room.seats[seat];
+  const option = drillWaitOptions(player).find((entry) => entry.key === key);
+  if (!option) return false;
+  player.route = "drill";
+  player.activeDrillWait = option;
+  addLog(room, `${player.name} 明示钻了，${option.label}。`);
+  if (!silent) broadcastRoom(room);
+  return true;
+}
+
+function completeDrill(room, seat, silent = false) {
+  if (room.winner || room.phase !== "discard" || room.currentSeat !== seat) return false;
+  const player = room.seats[seat];
+  if (!canCompleteDrill(player)) return false;
+  const wait = player.activeDrillWait;
+  const tiles = sortedHand([...wait.pattern, wait.waitingTile]);
+  removeTiles(player.hand, tiles);
+  player.melds.push({
+    id: makeId(8),
+    type: "drill",
+    kind: wait.kind,
+    tiles,
+    centerTile: tiles[1],
+    stacked: true,
+    fromSeat: seat
+  });
+  player.drawnTile = null;
+  player.activeDrillWait = null;
+  addLog(room, `${player.name} 再次明示钻了，将${tiles.map(tileName).join("、")}摞起。`);
+  if (!silent) broadcastRoom(room);
+  return true;
+}
+
+function declarePungStack(room, seat, key, silent = false) {
+  if (room.winner || room.phase === "waiting" || room.phase === "ended") return false;
+  const player = room.seats[seat];
+  const option = stackOptions(player).find((entry) => entry.key === key);
+  if (!option) return false;
+  player.route = "pung";
+
+  if (key.startsWith("meld:")) {
+    const meld = player.melds.find((entry) => entry.id === key.slice(5));
+    if (!meld) return false;
+    meld.stacked = true;
+    player.stackWindowMeldId = null;
+  } else {
+    const tile = key.slice("concealed:".length);
+    if (!removeTiles(player.hand, [tile, tile, tile])) return false;
+    player.melds.push({
+      id: makeId(8),
+      type: "concealed-pong",
+      tiles: [tile, tile, tile],
+      centerTile: tile,
+      stacked: true,
+      fromSeat: seat
+    });
+  }
+
+  addLog(room, `${player.name} 明示上摞，走三碰胡/四碰胡路线。`);
+  if (!silent) broadcastRoom(room);
+  return true;
 }
 
 function discardTile(room, seatIndex, tile) {
-  if (room.winner || room.phase !== "discard" || room.currentSeat !== seatIndex) return;
+  if (room.winner || room.phase !== "discard" || room.currentSeat !== seatIndex) return false;
   const player = room.seats[seatIndex];
   const index = player.hand.indexOf(tile);
-  if (index === -1) return;
+  if (index === -1) return false;
+
+  if (player.activeDrillWait) {
+    const remaining = [...player.hand];
+    remaining.splice(index, 1);
+    if (!hasTiles(remaining, player.activeDrillWait.pattern)) {
+      throw new Error("这张牌属于已明示的钻牌搭子，不能打出。");
+    }
+  }
 
   const [discarded] = player.hand.splice(index, 1);
   player.drawnTile = null;
+  player.lastDrawnTile = null;
+  if (player.stackWindowMeldId && !player.route) player.pungRouteClosed = true;
+  player.stackWindowMeldId = null;
   player.discards.push(discarded);
   room.lastDiscard = { tile: discarded, fromSeat: seatIndex };
-  addLog(room, `${player.name} 打出一张牌。`);
+  addLog(room, `${player.name} 打出${tileName(discarded)}。`);
+  offerRonClaims(room, seatIndex, discarded);
+  return true;
+}
 
+function sortedResponders(fromSeat, responders) {
+  return [...responders].sort((a, b) => ((a - fromSeat + 4) % 4) - ((b - fromSeat + 4) % 4));
+}
+
+function offerRonClaims(room, fromSeat, tile) {
   const responders = [];
   for (let seat = 0; seat < 4; seat += 1) {
-    if (seat === seatIndex) continue;
-    if (canWin([...room.seats[seat].hand, discarded])) responders.push(seat);
+    if (seat === fromSeat) continue;
+    if (evaluateWin(room.seats[seat], [...room.seats[seat].hand, tile]).valid) responders.push(seat);
   }
-
-  if (responders.length > 0) {
-    room.phase = "ron";
-    room.pendingRon = { tile: discarded, fromSeat: seatIndex, responders, passed: [] };
+  if (responders.length) {
+    room.phase = "claim";
+    room.pendingClaim = { stage: "ron", tile, fromSeat, responders: sortedResponders(fromSeat, responders), passed: [] };
     broadcastRoom(room);
-    const botWinner = responders.find((seat) => room.seats[seat].isBot);
-    if (botWinner !== undefined) {
-      room.timer = setTimeout(() => endWithWinner(room, botWinner, "点炮", discarded, seatIndex), 650);
-    }
+    scheduleBotClaim(room);
     return;
   }
+  offerPongClaim(room, fromSeat, tile);
+}
 
+function offerPongClaim(room, fromSeat, tile) {
+  const responders = [];
+  for (let seat = 0; seat < 4; seat += 1) {
+    if (seat !== fromSeat && countTile(room.seats[seat].hand, tile) >= 2) responders.push(seat);
+  }
+  const nearest = sortedResponders(fromSeat, responders)[0];
+  if (nearest !== undefined) {
+    room.phase = "claim";
+    room.pendingClaim = { stage: "pong", tile, fromSeat, responders: [nearest], passed: [] };
+    broadcastRoom(room);
+    scheduleBotClaim(room);
+    return;
+  }
   nextTurn(room);
 }
 
-function nextTurn(room) {
-  room.pendingRon = null;
-  room.currentSeat = (room.currentSeat + 1) % 4;
-  drawForCurrent(room);
+function scheduleBotClaim(room) {
+  const claim = room.pendingClaim;
+  if (!claim) return;
+  const botSeat = claim.responders.find((seat) => room.seats[seat].isBot);
+  if (botSeat === undefined) return;
+  room.timer = setTimeout(() => {
+    if (!room.pendingClaim || !room.pendingClaim.responders.includes(botSeat)) return;
+    if (room.pendingClaim.stage === "ron") claimRon(room, botSeat);
+    else if (room.seats[botSeat].route !== "drill" && Math.random() < 0.72) claimPong(room, botSeat);
+    else passClaim(room, botSeat);
+  }, 360 + Math.random() * 320);
 }
 
-function passRon(room, seat) {
-  if (!room.pendingRon || !room.pendingRon.responders.includes(seat)) return;
-  if (!room.pendingRon.passed.includes(seat)) room.pendingRon.passed.push(seat);
-  const allPassed = room.pendingRon.responders.every((candidate) => room.pendingRon.passed.includes(candidate));
-  if (allPassed) nextTurn(room);
-  else broadcastRoom(room);
+function passClaim(room, seat) {
+  const claim = room.pendingClaim;
+  if (!claim || !claim.responders.includes(seat)) return false;
+  if (!claim.passed.includes(seat)) claim.passed.push(seat);
+  const allPassed = claim.responders.every((candidate) => claim.passed.includes(candidate));
+  if (!allPassed) {
+    broadcastRoom(room);
+    return true;
+  }
+  if (claim.stage === "ron") offerPongClaim(room, claim.fromSeat, claim.tile);
+  else nextTurn(room);
+  return true;
+}
+
+function claimPong(room, seat) {
+  const claim = room.pendingClaim;
+  if (!claim || claim.stage !== "pong" || !claim.responders.includes(seat)) return false;
+  const player = room.seats[seat];
+  if (!removeTiles(player.hand, [claim.tile, claim.tile])) return false;
+  const discarder = room.seats[claim.fromSeat];
+  if (discarder.discards.at(-1) === claim.tile) discarder.discards.pop();
+
+  const meld = {
+    id: makeId(8),
+    type: "pong",
+    tiles: [claim.tile, claim.tile, claim.tile],
+    centerTile: claim.tile,
+    stacked: player.route === "pung",
+    fromSeat: claim.fromSeat
+  };
+  player.melds.push(meld);
+  player.stackWindowMeldId = meld.stacked ? null : meld.id;
+  player.drawnTile = null;
+  player.lastDrawnTile = null;
+  room.currentSeat = seat;
+  room.phase = "discard";
+  room.pendingClaim = null;
+  room.lastDiscard = null;
+  addLog(room, `${player.name} 碰了${tileName(claim.tile)}。`);
+  if (meld.stacked) addLog(room, `${player.name} 按上摞路线将这组碰牌摞起。`);
+  broadcastRoom(room);
+  if (player.isBot) {
+    if (!player.route && Math.random() < 0.38) declarePungStack(room, seat, `meld:${meld.id}`, true);
+    room.timer = setTimeout(() => botDiscard(room), 420 + Math.random() * 320);
+  }
+  return true;
 }
 
 function claimRon(room, seat) {
-  if (!room.pendingRon || !room.pendingRon.responders.includes(seat)) return;
-  const tile = room.pendingRon.tile;
-  const fromSeat = room.pendingRon.fromSeat;
+  const claim = room.pendingClaim;
+  if (!claim || claim.stage !== "ron" || !claim.responders.includes(seat)) return false;
+  const tile = claim.tile;
+  const fromSeat = claim.fromSeat;
   room.seats[seat].hand.push(tile);
   endWithWinner(room, seat, "点炮", tile, fromSeat);
+  return true;
+}
+
+function nextTurn(room) {
+  const fromSeat = room.lastDiscard?.fromSeat ?? room.pendingClaim?.fromSeat ?? room.currentSeat;
+  room.pendingClaim = null;
+  room.currentSeat = (fromSeat + 1) % 4;
+  drawForCurrent(room);
 }
 
 function endWithWinner(room, seat, method, winningTile, fromSeat) {
-  clearRoomTimer(room);
   const player = room.seats[seat];
+  if (!evaluateWin(player, player.hand).valid) return false;
+  clearRoomTimer(room);
   room.phase = "ended";
-  room.pendingRon = null;
+  room.pendingClaim = null;
   room.roundResult = calculateResult(room, seat, method, winningTile, fromSeat);
-  room.winner = {
-    seat,
-    name: player.name,
-    method,
-    text: `${player.name} ${method}胡牌！`
-  };
+  room.winner = { seat, name: player.name, method, text: `${player.name} ${method}胡牌！` };
   addLog(room, room.roundResult.text);
   broadcastRoom(room);
+  return true;
 }
 
 function botDiscard(room) {
   if (room.winner || room.phase !== "discard") return;
   const player = room.seats[room.currentSeat];
   if (!player || !player.isBot) return;
-  const tile = chooseBotDiscard(player.hand);
+  if (canCompleteDrill(player)) completeDrill(room, room.currentSeat, true);
+  if (evaluateWin(player, player.hand).valid) {
+    endWithWinner(room, room.currentSeat, "自摸", player.lastDrawnTile, null);
+    return;
+  }
+  const tile = chooseBotDiscard(player);
   discardTile(room, room.currentSeat, tile);
 }
 
-function chooseBotDiscard(hand) {
+function chooseBotDiscard(player) {
+  const locked = player.activeDrillWait?.pattern || [];
+  const candidates = sortedHand(player.hand).filter((tile, index, hand) => {
+    if (!locked.includes(tile)) return true;
+    const remaining = [...hand];
+    remaining.splice(index, 1);
+    return hasTiles(remaining, locked);
+  });
   const counts = new Map();
-  for (const tile of hand) counts.set(tile, (counts.get(tile) || 0) + 1);
-  const candidates = sortedHand(hand).map((tile) => {
+  for (const tile of candidates) counts.set(tile, (counts.get(tile) || 0) + 1);
+  const scored = candidates.map((tile) => {
     const suit = tile[0];
     const number = Number(tile[1]);
     let score = counts.get(tile) > 1 ? 4 : 0;
     if (!["m", "p", "s"].includes(suit)) score += 3;
     else {
       if (number === 1 || number === 9) score += 2;
-      if (hand.includes(`${suit}${number - 1}`) || hand.includes(`${suit}${number + 1}`)) score -= 2;
-      if (hand.includes(`${suit}${number - 2}`) || hand.includes(`${suit}${number + 2}`)) score -= 1;
+      if (player.hand.includes(`${suit}${number - 1}`) || player.hand.includes(`${suit}${number + 1}`)) score -= 2;
+      if (player.hand.includes(`${suit}${number - 2}`) || player.hand.includes(`${suit}${number + 2}`)) score -= 1;
     }
     return { tile, score: score + Math.random() };
   });
-  candidates.sort((a, b) => b.score - a.score);
-  return candidates[0].tile;
+  scored.sort((a, b) => b.score - a.score);
+  return scored[0]?.tile || player.hand[0];
 }
 
 function addLog(room, text) {
   room.log.unshift({ time: Date.now(), text });
-  room.log = room.log.slice(0, 18);
+  room.log = room.log.slice(0, 24);
 }
 
 function windName(seat) {
@@ -474,21 +782,38 @@ function clearRoomTimer(room) {
   room.timer = null;
 }
 
+function routeLabel(player) {
+  if (player.route === "drill") return "钻了";
+  if (player.route === "pung") return "上摞";
+  return "";
+}
+
 function roomSnapshot(room, viewerSeat) {
+  const viewer = room.seats[viewerSeat];
+  const claim = room.pendingClaim;
+  const isResponder = Boolean(claim && claim.responders.includes(viewerSeat) && !claim.passed.includes(viewerSeat));
+  const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   return {
+    version: "1.5",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat && seat.id === room.hostId),
     viewerSeat,
     phase: room.phase,
+    claimStage: claim?.stage || null,
     currentSeat: room.currentSeat,
     wallCount: room.wall.length,
     lastDiscard: room.lastDiscard,
     winner: room.winner,
     roundResult: room.roundResult,
-    canRon: Boolean(room.pendingRon && room.pendingRon.responders.includes(viewerSeat) && !room.pendingRon.passed.includes(viewerSeat)),
-    canDiscard: room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner,
-    canSelfWin: room.phase === "discard" && room.currentSeat === viewerSeat && canWin(room.seats[viewerSeat]?.hand || []),
+    canRon: isResponder && claim.stage === "ron",
+    canPong: isResponder && claim.stage === "pong",
+    canPass: isResponder,
+    canDiscard: viewerTurn,
+    canSelfWin: viewerTurn && evaluateWin(viewer, viewer?.hand || []).valid,
+    canCompleteDrill: viewerTurn && canCompleteDrill(viewer),
+    drillOptions: viewerTurn ? drillWaitOptions(viewer) : [],
+    stackOptions: !room.winner && room.phase !== "waiting" ? stackOptions(viewer) : [],
     players: room.seats.map((seat, index) => seat ? {
       seat: index,
       wind: windName(index),
@@ -499,6 +824,12 @@ function roomSnapshot(room, viewerSeat) {
       roundDelta: seat.roundDelta,
       handCount: seat.hand.length,
       discards: seat.discards,
+      melds: seat.melds,
+      route: seat.route,
+      routeLabel: routeLabel(seat),
+      activeDrillWait: seat.activeDrillWait
+        ? (index === viewerSeat ? seat.activeDrillWait : { declared: true })
+        : null,
       hand: index === viewerSeat || room.winner ? sortedHand(seat.hand) : null
     } : null),
     log: room.log
@@ -516,15 +847,10 @@ function broadcastRoom(room) {
 function sendJson(socket, payload) {
   if (!socket.writable) return;
   const data = Buffer.from(JSON.stringify(payload));
-  const header = [];
-  header.push(0x81);
-  if (data.length < 126) {
-    header.push(data.length);
-  } else if (data.length < 65536) {
-    header.push(126, (data.length >> 8) & 255, data.length & 255);
-  } else {
-    header.push(127, 0, 0, 0, 0, (data.length >> 24) & 255, (data.length >> 16) & 255, (data.length >> 8) & 255, data.length & 255);
-  }
+  const header = [0x81];
+  if (data.length < 126) header.push(data.length);
+  else if (data.length < 65536) header.push(126, (data.length >> 8) & 255, data.length & 255);
+  else header.push(127, 0, 0, 0, 0, (data.length >> 24) & 255, (data.length >> 16) & 255, (data.length >> 8) & 255, data.length & 255);
   socket.write(Buffer.concat([Buffer.from(header), data]));
 }
 
@@ -548,7 +874,7 @@ function parseFrame(buffer) {
   offset += masked ? 4 : 0;
   const payload = buffer.slice(offset, offset + length);
   if (masked) {
-    for (let i = 0; i < payload.length; i += 1) payload[i] ^= mask[i % 4];
+    for (let index = 0; index < payload.length; index += 1) payload[index] ^= mask[index % 4];
   }
   return { text: payload.toString("utf8") };
 }
@@ -567,7 +893,6 @@ function handleMessage(client, message) {
       createRoom(client, data.mode === "solo" ? "solo" : "online");
       return;
     }
-
     if (data.type === "join") {
       client.name = String(data.name || "玩家").slice(0, 12);
       const room = rooms.get(String(data.roomId || "").trim().toUpperCase());
@@ -580,20 +905,27 @@ function handleMessage(client, message) {
 
     const room = rooms.get(client.roomId);
     if (!room) return;
-
     if (data.type === "addBots" && client.id === room.hostId && room.phase === "waiting") {
       fillBots(room);
       broadcastRoom(room);
     } else if (data.type === "start" && client.id === room.hostId && room.phase === "waiting") {
       startGame(room);
     } else if (data.type === "discard") {
-      discardTile(room, client.seat, data.tile);
-    } else if (data.type === "selfWin" && room.currentSeat === client.seat && canWin(room.seats[client.seat].hand)) {
-      endWithWinner(room, client.seat, "自摸", room.seats[client.seat].drawnTile, null);
+      discardTile(room, client.seat, String(data.tile || ""));
+    } else if (data.type === "declareDrill") {
+      declareDrillWait(room, client.seat, String(data.key || ""));
+    } else if (data.type === "completeDrill") {
+      completeDrill(room, client.seat);
+    } else if (data.type === "declarePung") {
+      declarePungStack(room, client.seat, String(data.key || ""));
+    } else if (data.type === "selfWin" && room.currentSeat === client.seat) {
+      endWithWinner(room, client.seat, "自摸", room.seats[client.seat].lastDrawnTile, null);
     } else if (data.type === "ron") {
       claimRon(room, client.seat);
+    } else if (data.type === "pong") {
+      claimPong(room, client.seat);
     } else if (data.type === "pass") {
-      passRon(room, client.seat);
+      passClaim(room, client.seat);
     } else if (data.type === "restart" && client.id === room.hostId) {
       startGame(room);
     }
@@ -617,7 +949,10 @@ function serveStatic(req, res) {
       res.end("Not found");
       return;
     }
-    res.writeHead(200, { "Content-Type": contentType(filePath) });
+    res.writeHead(200, {
+      "Content-Type": contentType(filePath),
+      "Cache-Control": filePath.endsWith(".svg") ? "public, max-age=604800" : "no-cache"
+    });
     res.end(content);
   });
 }
@@ -645,7 +980,6 @@ server.on("upgrade", (req, socket) => {
     .createHash("sha1")
     .update(req.headers["sec-websocket-key"] + WS_GUID)
     .digest("base64");
-
   socket.write([
     "HTTP/1.1 101 Switching Protocols",
     "Upgrade: websocket",
@@ -657,17 +991,12 @@ server.on("upgrade", (req, socket) => {
 
   const client = { id: crypto.randomUUID(), socket, name: "玩家", roomId: null, seat: -1 };
   clients.set(client.id, client);
-
   socket.on("data", (buffer) => {
     const frame = parseFrame(buffer);
     if (!frame) return;
-    if (frame.close) {
-      socket.end();
-      return;
-    }
+    if (frame.close) return socket.end();
     handleMessage(client, frame.text);
   });
-
   socket.on("close", () => {
     clients.delete(client.id);
     const room = rooms.get(client.roomId);
@@ -681,6 +1010,23 @@ server.on("upgrade", (req, socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Mahjong web game running at http://localhost:${PORT}`);
-});
+if (require.main === module) {
+  server.listen(PORT, () => {
+    console.log(`Mahjong web game running at http://localhost:${PORT}`);
+  });
+}
+
+module.exports = {
+  tileTypes,
+  standardShape,
+  isSevenPairs,
+  isLuxurySevenPairs,
+  isThirteenBuKao,
+  isThirteenOrphans,
+  isPureOneSuit,
+  hasOneDragon,
+  evaluateWin,
+  drillWaitOptions,
+  canCompleteDrill,
+  makePlayer
+};

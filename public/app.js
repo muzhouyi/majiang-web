@@ -18,41 +18,49 @@ const tileAssetMap = {
 let socket;
 let state = null;
 let toast = "";
+let connection = "连接中";
+let reconnectTimer = null;
 let name = localStorage.getItem("majiang:name") || `玩家${Math.floor(Math.random() * 90) + 10}`;
 
 const app = document.querySelector("#app");
 
 function connect() {
+  clearTimeout(reconnectTimer);
+  connection = "连接中";
   socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`);
+  socket.addEventListener("open", () => {
+    connection = "已连接";
+    render();
+  });
   socket.addEventListener("message", (event) => {
     const payload = JSON.parse(event.data);
     if (payload.type === "state") {
       state = payload.state;
       toast = "";
-      render();
     } else if (payload.type === "error") {
       toast = payload.message;
-      render();
     }
+    render();
   });
   socket.addEventListener("close", () => {
-    toast = "连接断开，正在重连...";
+    connection = "重连中";
+    toast = "连接断开，正在重连。";
     render();
-    setTimeout(connect, 1200);
+    reconnectTimer = setTimeout(connect, 1200);
   });
 }
 
 function send(payload) {
   if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(payload));
+  else {
+    toast = "还没有连上服务器，请稍等。";
+    render();
+  }
 }
 
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (char) => ({
-    "&": "&amp;",
-    "<": "&lt;",
-    ">": "&gt;",
-    '"': "&quot;",
-    "'": "&#39;"
+    "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
   }[char]));
 }
 
@@ -87,20 +95,46 @@ function renderTile(tile, options = {}) {
   const attrs = options.clickable
     ? `type="button" data-discard="${tile}" aria-label="打出${tileLabels[tile] || tile}"`
     : `role="img" aria-label="${tileLabels[tile] || tile}"`;
-  return `
-    <${tag} class="tile tile-${tileKind(tile)} ${options.mini ? "tile-mini" : ""} ${options.clickable ? "tile-clickable" : ""}" ${attrs}>
-      ${tileImage(tile)}
-    </${tag}>
-  `;
+  const classes = [
+    "tile",
+    `tile-${tileKind(tile)}`,
+    options.mini ? "tile-mini" : "",
+    options.micro ? "tile-micro" : "",
+    options.clickable ? "tile-clickable" : "",
+    options.locked ? "tile-locked" : ""
+  ].filter(Boolean).join(" ");
+  return `<${tag} class="${classes}" ${attrs}>${tileImage(tile)}</${tag}>`;
 }
 
 function renderBackTiles(count) {
-  return Array.from({ length: count }, () => `<span class="tile-back" aria-hidden="true"></span>`).join("");
+  const shown = Math.min(count, 13);
+  return Array.from({ length: shown }, () => `<span class="tile-back" aria-hidden="true"></span>`).join("");
 }
 
 function renderDiscards(discards) {
-  if (!discards.length) return `<span class="empty-discard">未出牌</span>`;
-  return discards.map((tile) => renderTile(tile, { mini: true })).join("");
+  if (!discards.length) return `<span class="empty-discard">暂无弃牌</span>`;
+  return discards.map((tile) => renderTile(tile, { micro: true })).join("");
+}
+
+function renderMeld(meld) {
+  if (!meld.stacked) {
+    return `<div class="meld meld-row" aria-label="碰牌 ${tileLabels[meld.tiles[0]]}">${meld.tiles.map((tile) => renderTile(tile, { micro: true })).join("")}</div>`;
+  }
+  const sides = [...meld.tiles];
+  const centerIndex = sides.indexOf(meld.centerTile);
+  const [upper] = sides.splice(centerIndex < 0 ? 1 : centerIndex, 1);
+  return `
+    <div class="meld meld-stacked" aria-label="上摞 ${meld.tiles.map((tile) => tileLabels[tile]).join("、")}">
+      <span class="stack-tile stack-left">${renderTile(sides[0], { micro: true })}</span>
+      <span class="stack-tile stack-right">${renderTile(sides[1], { micro: true })}</span>
+      <span class="stack-tile stack-upper">${renderTile(upper, { micro: true })}</span>
+    </div>
+  `;
+}
+
+function renderMelds(melds) {
+  if (!melds?.length) return "";
+  return `<div class="meld-shelf">${melds.map(renderMeld).join("")}</div>`;
 }
 
 function scoreClass(value) {
@@ -112,28 +146,25 @@ function scoreClass(value) {
 function renderLobby() {
   app.innerHTML = `
     <section class="lobby">
-      <div class="brand-panel">
+      <div class="lobby-brand">
         <div class="brand-mark">${renderTile("C")}</div>
         <div>
-          <p class="eyebrow">东光/沧州规则试做版 · v1.4</p>
+          <p class="eyebrow">东光规则 · v1.5</p>
           <h1>青桌麻将</h1>
-          <p class="lede">牌面改为本地 SVG 矢量素材：筒子、条子、万子和字牌都加载真实麻将牌图，不再用文本或手绘坐标代替。</p>
+          <p class="lede">摸牌有声，落牌有数。坐下开一桌。</p>
         </div>
       </div>
 
       <form class="join-panel" id="lobbyForm">
-        <label>
-          昵称
-          <input id="nameInput" maxlength="12" value="${escapeHtml(name)}" />
-        </label>
-        <label>
-          房间号
-          <input id="roomInput" maxlength="6" placeholder="输入好友给你的房间号" />
-        </label>
-        ${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}
+        <div class="connection-line"><span class="status-dot"></span>${connection}</div>
+        <label for="nameInput">昵称</label>
+        <input id="nameInput" maxlength="12" value="${escapeHtml(name)}" autocomplete="nickname" />
+        <label for="roomInput">房间号</label>
+        <input id="roomInput" maxlength="6" placeholder="输入六位房间号" autocomplete="off" inputmode="text" />
+        ${toast ? `<p class="toast" role="status">${escapeHtml(toast)}</p>` : ""}
         <div class="lobby-actions">
           <button class="primary" type="button" id="soloBtn">单人开局</button>
-          <button type="button" id="createBtn">创建联机房</button>
+          <button type="button" id="createBtn">创建房间</button>
           <button type="submit">加入房间</button>
         </div>
       </form>
@@ -158,124 +189,122 @@ function renderGame() {
   const seats = state.players.filter(Boolean);
   app.innerHTML = `
     <section class="game">
-      <header class="topbar">
-        <div>
-          <p class="eyebrow">房间 ${state.roomId} · ${state.mode === "solo" ? "单人局" : "联机房"}</p>
-          <h1>${gameTitle()}</h1>
+      <header class="gamebar">
+        <div class="game-identity">
+          <span class="mini-mark">${renderTile("C", { micro: true })}</span>
+          <div><strong>青桌麻将</strong><small>${state.mode === "solo" ? "单人局" : `房间 ${state.roomId}`} · v${state.version}</small></div>
         </div>
-        <div class="table-stats">
-          <span>牌墙 ${state.wallCount}</span>
-          <span>东光/沧州暂定积分</span>
+        <div class="round-stats" aria-label="牌局状态">
+          <span>余牌 <b>${state.wallCount}</b></span>
+          <span>${connection}</span>
         </div>
+        <details class="mobile-info">
+          <summary>牌局</summary>
+          ${renderInfoContent()}
+        </details>
       </header>
 
-      <section class="score-strip">
-        ${seats.map(renderScore).join("")}
-      </section>
-
-      <div class="table">
-        <div class="table-center">
-          <div class="round-disc">
-            <strong>${state.winner ? "胡" : state.phase === "ron" ? "听" : state.phase === "waiting" ? "等" : "摸"}</strong>
-            <span>${centerText()}</span>
+      <div class="play-layout">
+        <main class="table" aria-label="麻将牌桌">
+          <div class="table-center">
+            <div class="turn-marker">
+              <strong>${centerGlyph()}</strong>
+              <span>${centerText()}</span>
+            </div>
+            ${state.lastDiscard ? `<div class="last-discard"><span>上张</span>${renderTile(state.lastDiscard.tile, { mini: true })}</div>` : ""}
           </div>
-          ${state.lastDiscard ? `<div class="last-discard"><span>上张</span>${renderTile(state.lastDiscard.tile, { mini: true })}</div>` : ""}
-        </div>
-        ${seats.map(renderSeat).join("")}
+          ${seats.map(renderSeat).join("")}
+        </main>
+
+        <aside class="info-rail">
+          ${renderInfoContent()}
+        </aside>
       </div>
 
-      <aside class="side-panel">
-        <section class="room-card">
-          <div class="room-code">
-            <span>房间号</span>
-            <strong>${state.roomId}</strong>
-            <button id="copyBtn" type="button">复制</button>
-          </div>
-          <div class="action-row">
-            ${state.phase === "waiting" && state.viewerSeat === state.hostSeat ? `<button id="addBotsBtn" type="button">补电脑</button><button class="primary" id="startBtn" type="button">开始</button>` : ""}
-            ${state.winner && state.viewerSeat === state.hostSeat ? `<button class="primary" id="restartBtn" type="button">再来一局</button>` : ""}
-            ${state.canSelfWin ? `<button class="gold" id="selfWinBtn" type="button">自摸胡</button>` : ""}
-            ${state.canRon ? `<button class="gold" id="ronBtn" type="button">胡这张</button><button id="passBtn" type="button">过</button>` : ""}
-          </div>
-          ${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}
-        </section>
-
-        ${renderResult()}
-
-        <section class="log-card">
-          <h2>牌局记录</h2>
-          <ol>${state.log.map((entry) => `<li>${escapeHtml(entry.text)}</li>`).join("")}</ol>
-        </section>
-      </aside>
-
-      <section class="hand-tray">
-        <div class="hand-title">
-          <div>
-            <p class="eyebrow">${self.wind}位 · ${escapeHtml(self.name)}</p>
-            <h2>${handHint()}</h2>
-          </div>
-          <span class="hand-count">${self.hand?.length || 0} 张</span>
+      <section class="hand-console">
+        <div class="action-dock">
+          <div class="turn-copy"><strong>${handHint()}</strong><span>${self.routeLabel || "尚未明示路线"}</span></div>
+          <div class="action-buttons">${renderActions()}</div>
         </div>
-        <div class="hand">${(self.hand || []).map((tile) => renderTile(tile, { clickable: state.canDiscard })).join("")}</div>
+        ${toast ? `<p class="toast game-toast" role="status">${escapeHtml(toast)}</p>` : ""}
+        <div class="self-melds">${renderMelds(self.melds)}</div>
+        <div class="hand" style="--hand-count:${Math.max(self.hand?.length || 1, 1)}">${renderHand(self)}</div>
       </section>
     </section>
   `;
 
-  app.querySelectorAll("[data-discard]").forEach((button) => {
-    button.addEventListener("click", () => send({ type: "discard", tile: button.dataset.discard }));
-  });
-  app.querySelector("#copyBtn")?.addEventListener("click", async () => {
-    await navigator.clipboard?.writeText(state.roomId);
-    toast = "房间号已复制。";
-    render();
-  });
-  app.querySelector("#addBotsBtn")?.addEventListener("click", () => send({ type: "addBots" }));
-  app.querySelector("#startBtn")?.addEventListener("click", () => send({ type: "start" }));
-  app.querySelector("#restartBtn")?.addEventListener("click", () => send({ type: "restart" }));
-  app.querySelector("#selfWinBtn")?.addEventListener("click", () => send({ type: "selfWin" }));
-  app.querySelector("#ronBtn")?.addEventListener("click", () => send({ type: "ron" }));
-  app.querySelector("#passBtn")?.addEventListener("click", () => send({ type: "pass" }));
+  bindGameEvents();
 }
 
-function gameTitle() {
-  if (state.phase === "waiting") return "等待开局";
-  if (state.winner) return "牌局结束";
-  return `${state.players[state.currentSeat]?.name || ""} 行牌中`;
+function renderHand(self) {
+  const locked = new Map();
+  for (const tile of self.activeDrillWait?.pattern || []) locked.set(tile, (locked.get(tile) || 0) + 1);
+  return (self.hand || []).map((tile) => {
+    const isLocked = (locked.get(tile) || 0) > 0;
+    if (isLocked) locked.set(tile, locked.get(tile) - 1);
+    return renderTile(tile, { clickable: state.canDiscard, locked: isLocked });
+  }).join("");
 }
 
-function centerText() {
-  if (state.winner) return state.roundResult?.text || state.winner.text;
-  if (state.phase === "ron") return "有人可胡这张牌";
-  if (state.phase === "waiting") return "补齐玩家后开始";
-  return "摸打进行中";
+function renderActions() {
+  const buttons = [];
+  if (state.phase === "waiting" && state.viewerSeat === state.hostSeat) {
+    buttons.push(`<button type="button" data-action="addBots">补电脑</button>`);
+    buttons.push(`<button class="primary" type="button" data-action="start">开始</button>`);
+  }
+  if (state.winner && state.viewerSeat === state.hostSeat) {
+    buttons.push(`<button class="primary" type="button" data-action="restart">再来一局</button>`);
+  }
+  if (state.canSelfWin) buttons.push(`<button class="win" type="button" data-action="selfWin">自摸</button>`);
+  if (state.canRon) buttons.push(`<button class="win" type="button" data-action="ron">胡</button>`);
+  if (state.canPong) buttons.push(`<button class="call" type="button" data-action="pong">碰</button>`);
+  if (state.canPass) buttons.push(`<button type="button" data-action="pass">过</button>`);
+  if (state.canCompleteDrill) buttons.push(`<button class="declare" type="button" data-action="completeDrill">钻了并上摞</button>`);
+  for (const option of state.drillOptions || []) {
+    buttons.push(`<button class="declare" type="button" data-declare-drill="${escapeHtml(option.key)}">钻了 · 等${escapeHtml(tileLabels[option.waitingTile])}（${option.kind === "edge" ? "边" : "钻"}）</button>`);
+  }
+  for (const option of state.stackOptions || []) {
+    buttons.push(`<button class="declare" type="button" data-declare-pung="${escapeHtml(option.key)}">${escapeHtml(option.label)}</button>`);
+  }
+  if (!buttons.length) return `<span class="action-idle">${state.winner ? "本局已结算" : "等待牌局动作"}</span>`;
+  return buttons.join("");
 }
 
-function handHint() {
-  if (state.canDiscard) return "点一张牌打出";
-  if (state.canRon) return "可以胡牌或选择过";
-  if (state.winner) return "本局结算完成";
-  return "等待其他玩家";
+function renderInfoContent() {
+  return `
+    <section class="room-panel">
+      <div><small>房间号</small><strong>${state.roomId}</strong></div>
+      <button type="button" data-action="copy">复制</button>
+    </section>
+    ${renderResult()}
+    <section class="score-panel">
+      <h2>积分</h2>
+      ${state.players.filter(Boolean).map(renderScore).join("")}
+    </section>
+    <details class="log-panel" open>
+      <summary>牌局记录</summary>
+      <ol>${state.log.map((entry) => `<li>${escapeHtml(entry.text)}</li>`).join("")}</ol>
+    </details>
+  `;
 }
 
 function renderScore(player) {
   return `
-    <article class="score-card ${player.seat === state.viewerSeat ? "score-self" : ""} ${state.currentSeat === player.seat && !state.winner ? "score-active" : ""}">
+    <div class="score-line ${player.seat === state.viewerSeat ? "score-self" : ""}">
       <span class="wind">${player.wind}</span>
-      <div>
-        <strong>${escapeHtml(player.name)}</strong>
-        <em>${player.isBot ? "电脑" : "玩家"}</em>
-      </div>
+      <span><strong>${escapeHtml(player.name)}</strong><small>${player.routeLabel || (player.isBot ? "电脑" : "玩家")}</small></span>
       <b>${player.score}</b>
-      <small class="${scoreClass(player.roundDelta)}">${player.roundDelta > 0 ? "+" : ""}${player.roundDelta}</small>
-    </article>
+      <em class="${scoreClass(player.roundDelta)}">${player.roundDelta > 0 ? "+" : ""}${player.roundDelta}</em>
+    </div>
   `;
 }
 
 function renderResult() {
   if (!state.roundResult?.items?.length) return "";
   return `
-    <section class="result-card">
+    <section class="result-panel">
       <h2>本局结算</h2>
+      <p>${escapeHtml(state.roundResult.text)}</p>
       <ul>${state.roundResult.items.map((item) => `<li><span>${escapeHtml(item.name)}</span><strong>${item.points}</strong></li>`).join("")}</ul>
     </section>
   `;
@@ -285,17 +314,83 @@ function renderSeat(player) {
   const position = relativeSeat(player.seat);
   const active = state.currentSeat === player.seat && !state.winner;
   const isSelf = player.seat === state.viewerSeat;
+  const route = player.routeLabel ? `<span class="route-badge route-${player.route}">${player.routeLabel}</span>` : "";
+  const wait = player.activeDrillWait && isSelf && player.activeDrillWait.waitingTile
+    ? `<span class="wait-badge">等${tileLabels[player.activeDrillWait.waitingTile]}</span>`
+    : "";
   return `
-    <section class="seat seat-${position} ${active ? "seat-active" : ""}">
+    <section class="seat seat-${position} ${active ? "seat-active" : ""} ${isSelf ? "seat-self" : ""}">
       <div class="seat-head">
         <span class="wind">${player.wind}</span>
         <strong>${escapeHtml(player.name)}</strong>
+        ${route}${wait}
         <em>${player.score}</em>
       </div>
+      ${renderMelds(player.melds)}
       ${isSelf ? "" : `<div class="opponent-hand">${renderBackTiles(player.handCount)}</div>`}
       <div class="discard-river">${renderDiscards(player.discards)}</div>
     </section>
   `;
+}
+
+function centerGlyph() {
+  if (state.winner) return "胡";
+  if (state.phase === "claim") return state.claimStage === "ron" ? "胡" : "碰";
+  if (state.phase === "waiting") return "等";
+  return state.players[state.currentSeat]?.wind || "东";
+}
+
+function centerText() {
+  if (state.winner) return state.roundResult?.text || state.winner.text;
+  if (state.phase === "claim") return state.claimStage === "ron" ? "等待胡牌回应" : "等待碰牌回应";
+  if (state.phase === "waiting") return "等待开局";
+  return `${state.players[state.currentSeat]?.name || ""} 行牌`;
+}
+
+function handHint() {
+  if (state.canRon) return "可以胡这张牌";
+  if (state.canPong) return "可以碰这张牌";
+  if (state.canDiscard) return "请选择一张牌打出";
+  if (state.winner) return "本局结束";
+  return "等待其他玩家";
+}
+
+function bindGameEvents() {
+  app.querySelectorAll("[data-discard]").forEach((button) => {
+    button.addEventListener("click", () => send({ type: "discard", tile: button.dataset.discard }));
+  });
+  app.querySelectorAll("[data-declare-drill]").forEach((button) => {
+    button.addEventListener("click", () => send({ type: "declareDrill", key: button.dataset.declareDrill }));
+  });
+  app.querySelectorAll("[data-declare-pung]").forEach((button) => {
+    button.addEventListener("click", () => send({ type: "declarePung", key: button.dataset.declarePung }));
+  });
+  app.querySelectorAll("[data-action]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const action = button.dataset.action;
+      if (action === "copy") {
+        try {
+          await navigator.clipboard.writeText(state.roomId);
+          toast = "房间号已复制。";
+        } catch {
+          toast = `房间号：${state.roomId}`;
+        }
+        render();
+        return;
+      }
+      const messages = {
+        addBots: { type: "addBots" },
+        start: { type: "start" },
+        restart: { type: "restart" },
+        selfWin: { type: "selfWin" },
+        ron: { type: "ron" },
+        pong: { type: "pong" },
+        pass: { type: "pass" },
+        completeDrill: { type: "completeDrill" }
+      };
+      if (messages[action]) send(messages[action]);
+    });
+  });
 }
 
 function render() {
