@@ -569,16 +569,64 @@ button.tile {
   filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.28));
 }
 
+.tile-side-fill {
+  fill: var(--tile-side);
+}
+
 .tile-body {
-  fill: var(--tile);
-  stroke: rgba(0, 0, 0, 0.16);
-  stroke-width: 1.2;
+  fill: url("#tileFill");
+  stroke: rgba(0, 0, 0, 0.18);
+  stroke-width: 1.15;
 }
 
 .tile-inner {
-  fill: var(--tile-inner);
-  stroke: rgba(0, 0, 0, 0.06);
+  fill: rgba(255, 255, 255, 0.42);
+  stroke: rgba(0, 0, 0, 0.045);
   stroke-width: 1;
+}
+
+.wan-number,
+.wan-mark,
+.honor-glyph {
+  dominant-baseline: middle;
+  font-family: "STKaiti", "KaiTi", "SimSun", "Microsoft YaHei", serif;
+  font-weight: 900;
+  paint-order: stroke;
+  stroke: rgba(255, 248, 233, 0.35);
+  stroke-width: 0.55px;
+}
+
+.wan-number {
+  fill: #151515;
+  font-size: 24px;
+}
+
+.wan-mark {
+  fill: #bd2c2c;
+  font-size: 28px;
+}
+
+.honor-glyph {
+  font-size: 43px;
+  letter-spacing: 0;
+}
+
+.honor-black {
+  fill: #151515;
+}
+
+.honor-red {
+  fill: #bd2c2c;
+}
+
+.honor-green {
+  fill: #147c5b;
+}
+
+.pin-dot,
+.bamboo,
+.bird-art {
+  vector-effect: non-scaling-stroke;
 }
 
 .tile-mini {
