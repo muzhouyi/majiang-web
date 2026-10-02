@@ -118,6 +118,16 @@ test("玩家积分累计可由管理者独立关闭", () => {
   assert.match(serverSource, /if \(!adminData\.playerScores\.enabled\) return/);
 });
 
+test("管理者可以删除单局回放和单个玩家积分记录", () => {
+  assert.match(appSource, /data-delete-replay/);
+  assert.match(appSource, /data-delete-player/);
+  assert.match(appSource, /window\.confirm\("确定删除这局牌局回放吗/);
+  assert.match(serverSource, /data\.type === "adminDeleteReplay"/);
+  assert.match(serverSource, /data\.type === "adminDeletePlayer"/);
+  assert.match(serverSource, /adminData\.replays\.splice/);
+  assert.match(serverSource, /delete adminData\.players\[playerId\]/);
+});
+
 test("明杠暗杠使用四张并进入现有明示牌架", () => {
   assert.match(appSource, /data-action="kong"/);
   assert.match(appSource, /data-concealed-kong/);

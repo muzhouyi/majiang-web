@@ -1,0 +1,12 @@
+.git
+.agents
+.interface-design
+deploy
+tests
+versions
+素材
+*.log
+*.zip
+data
+README.md
+胡牌规则.md

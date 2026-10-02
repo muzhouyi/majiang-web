@@ -1088,7 +1088,7 @@ function roomSnapshot(room, viewerSeat) {
   const isResponder = Boolean(claim && claim.responders.includes(viewerSeat) && !claim.passed.includes(viewerSeat));
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   return {
-    version: "2.3",
+    version: "2.5",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat && seat.id === room.hostId),
@@ -1184,6 +1184,24 @@ function handleAdminMessage(client, data) {
   } else if (data.type === "adminGetReplay") {
     const replay = adminData.replays.find((entry) => entry.id === data.replayId);
     sendJson(client.socket, replay ? { type: "adminReplay", replay } : { type: "adminError", message: "没有找到这局回放。" });
+  } else if (data.type === "adminDeleteReplay") {
+    const replayIndex = adminData.replays.findIndex((entry) => entry.id === String(data.replayId || ""));
+    if (replayIndex === -1) {
+      sendJson(client.socket, { type: "adminError", message: "没有找到这局回放。" });
+      return true;
+    }
+    adminData.replays.splice(replayIndex, 1);
+    saveAdminData();
+    sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "牌局回放已删除。" });
+  } else if (data.type === "adminDeletePlayer") {
+    const playerId = String(data.playerId || "");
+    if (!adminData.players[playerId]) {
+      sendJson(client.socket, { type: "adminError", message: "没有找到这个真实玩家。" });
+      return true;
+    }
+    delete adminData.players[playerId];
+    saveAdminData();
+    sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "玩家积分记录已删除。" });
   } else if (data.type === "adminUpdatePlayer" || data.type === "adminResetPlayer") {
     const player = adminData.players[String(data.playerId || "")];
     if (!player) {

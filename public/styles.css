@@ -412,8 +412,10 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 .admin-toggle small { color: var(--muted); font-size: 10px; }
 .admin-toggle input { width: 22px; height: 22px; accent-color: #65bd9a; }
 .replay-list { display: grid; }
-.replay-list > button { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 58px; border-width: 0 0 1px; border-radius: 0; background: transparent; text-align: left; }
-.replay-list > button span { display: grid; min-width: 0; }
+.replay-list-row { display: grid; grid-template-columns: minmax(0, 1fr) 64px; align-items: stretch; border-bottom: 1px solid rgba(255,255,255,.08); }
+.replay-list-row .replay-open { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; min-height: 58px; border: 0; border-radius: 0; background: transparent; text-align: left; }
+.replay-list-row .replay-open span { display: grid; min-width: 0; }
+.replay-delete { align-self: center; min-height: 38px; padding: 0 8px; border-color: rgba(230,112,96,.34); }
 .replay-list strong, .replay-list small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .replay-list small { margin-top: 3px; color: var(--muted); font-size: 10px; }
 .replay-list b { flex: 0 0 auto; color: #e2c66f; font-size: 11px; }
@@ -439,7 +441,7 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 .replay-scrubber { display: grid; grid-template-columns: 54px 1fr; align-items: center; gap: 10px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; }
 .replay-scrubber input { width: 100%; accent-color: #d8a93c; }
 .player-admin-list { display: grid; }
-.player-admin-row { display: grid; grid-template-columns: minmax(120px, 1fr) 110px 64px 64px; align-items: center; gap: 8px; min-height: 58px; border-bottom: 1px solid rgba(255,255,255,.08); }
+.player-admin-row { display: grid; grid-template-columns: minmax(120px, 1fr) 100px 58px 58px 58px; align-items: center; gap: 6px; min-height: 58px; border-bottom: 1px solid rgba(255,255,255,.08); }
 .player-admin-row > span { display: grid; min-width: 0; }
 .player-admin-row strong, .player-admin-row small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .player-admin-row small { color: var(--muted); font-size: 9px; }
@@ -570,7 +572,7 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
   .replay-discards { grid-template-columns: repeat(10, 22px); }
   .replay-controls { grid-template-columns: 68px minmax(0, 1fr) 68px; gap: 6px; }
   .replay-controls > button span { display: none; }
-  .player-admin-row { grid-template-columns: minmax(0, 1fr) 84px 52px 52px; gap: 5px; }
+  .player-admin-row { grid-template-columns: minmax(0, 1fr) 74px repeat(3, 46px); gap: 4px; }
   .player-admin-row button { padding: 0 5px; }
 }
 

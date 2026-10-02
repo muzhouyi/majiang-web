@@ -197,7 +197,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v2.4</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v2.5</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -332,13 +332,13 @@ function renderAdminReplay() {
   const records = adminData.replays || [];
   return `<section class="admin-section replay-settings">
     <label class="admin-toggle"><span><strong>记录牌局</strong><small>关闭后不再保存新牌局，已有回放保留。</small></span><input type="checkbox" data-replay-enabled ${adminData.replay.enabled ? "checked" : ""} /></label>
-  </section>${renderReplayViewer() || `<section class="admin-section"><h3>牌局回放</h3><div class="replay-list">${records.length ? records.map((replay) => `<button type="button" data-replay-id="${escapeHtml(replay.id)}"><span><strong>${escapeHtml(replay.roomId)} · ${escapeHtml(replay.players.join(" / "))}</strong><small>${new Date(replay.createdAt).toLocaleString()} · ${escapeHtml(replay.result)}</small></span><b>${replay.frameCount}步</b></button>`).join("") : '<p class="admin-empty">还没有保存的牌局回放。</p>'}</div></section>`}`;
+  </section>${renderReplayViewer() || `<section class="admin-section"><h3>牌局回放</h3><div class="replay-list">${records.length ? records.map((replay) => `<div class="replay-list-row"><button class="replay-open" type="button" data-replay-id="${escapeHtml(replay.id)}"><span><strong>${escapeHtml(replay.roomId)} · ${escapeHtml(replay.players.join(" / "))}</strong><small>${new Date(replay.createdAt).toLocaleString()} · ${escapeHtml(replay.result)}</small></span><b>${replay.frameCount}步</b></button><button class="danger-quiet replay-delete" type="button" data-delete-replay="${escapeHtml(replay.id)}" aria-label="删除 ${escapeHtml(replay.roomId)} 的牌局回放">删除</button></div>`).join("") : '<p class="admin-empty">还没有保存的牌局回放。</p>'}</div></section>`}`;
 }
 
 function renderAdminPlayers() {
   const players = adminData.players || [];
   return `<section class="admin-section player-score-settings"><label class="admin-toggle"><span><strong>记录玩家积分变动</strong><small>关闭后牌局仍正常结算，但不再把变化累计到真实玩家档案。</small></span><input type="checkbox" data-player-scores-enabled ${adminData.playerScores?.enabled !== false ? "checked" : ""} /></label></section>
-  <section class="admin-section"><h3>真实玩家积分</h3><div class="player-admin-list">${players.length ? players.map((player) => `<form class="player-admin-row" data-player-form="${escapeHtml(player.id)}"><span><strong>${escapeHtml(player.name)}</strong><small>${new Date(player.updatedAt).toLocaleString()}</small></span><input type="number" value="${player.score}" data-player-score aria-label="${escapeHtml(player.name)}的积分" /><button type="submit">修改</button><button type="button" class="danger-quiet" data-reset-player="${escapeHtml(player.id)}">重置</button></form>`).join("") : '<p class="admin-empty">暂无真实玩家记录。</p>'}</div></section>`;
+  <section class="admin-section"><h3>真实玩家积分</h3><div class="player-admin-list">${players.length ? players.map((player) => `<form class="player-admin-row" data-player-form="${escapeHtml(player.id)}"><span><strong>${escapeHtml(player.name)}</strong><small>${new Date(player.updatedAt).toLocaleString()}</small></span><input type="number" value="${player.score}" data-player-score aria-label="${escapeHtml(player.name)}的积分" /><button type="submit">修改</button><button type="button" class="danger-quiet" data-reset-player="${escapeHtml(player.id)}">重置</button><button type="button" class="danger-quiet" data-delete-player="${escapeHtml(player.id)}" data-player-name="${escapeHtml(player.name)}">删除</button></form>`).join("") : '<p class="admin-empty">暂无真实玩家记录。</p>'}</div></section>`;
 }
 
 function renderAdminLayer() {
@@ -347,7 +347,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.4</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.5</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
@@ -393,11 +393,17 @@ function bindAdminEvents() {
   app.querySelector("[data-replay-previous]")?.addEventListener("click", () => { replayFrameIndex = Math.max(0, replayFrameIndex - 1); render(); });
   app.querySelector("[data-replay-next]")?.addEventListener("click", () => { replayFrameIndex = Math.min(adminReplay.frames.length - 1, replayFrameIndex + 1); render(); });
   app.querySelector("[data-player-scores-enabled]")?.addEventListener("change", (event) => send({ type: "adminUpdatePlayerScores", enabled: event.target.checked }));
+  app.querySelectorAll("[data-delete-replay]").forEach((button) => button.addEventListener("click", () => {
+    if (window.confirm("确定删除这局牌局回放吗？删除后无法恢复。")) send({ type: "adminDeleteReplay", replayId: button.dataset.deleteReplay });
+  }));
   app.querySelectorAll("[data-player-form]").forEach((form) => form.addEventListener("submit", (event) => {
     event.preventDefault();
     send({ type: "adminUpdatePlayer", playerId: form.dataset.playerForm, score: Number(form.querySelector("[data-player-score]").value) });
   }));
   app.querySelectorAll("[data-reset-player]").forEach((button) => button.addEventListener("click", () => send({ type: "adminResetPlayer", playerId: button.dataset.resetPlayer })));
+  app.querySelectorAll("[data-delete-player]").forEach((button) => button.addEventListener("click", () => {
+    if (window.confirm(`确定删除 ${button.dataset.playerName} 的积分记录吗？`)) send({ type: "adminDeletePlayer", playerId: button.dataset.deletePlayer });
+  }));
 }
 
 function renderSeat(player) {
