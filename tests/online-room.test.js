@@ -100,7 +100,9 @@ test("大厅、房主踢人、托管重连和全员重开可以连贯完成", as
   const admin = websocketClient(`ws://127.0.0.1:${port}`);
   await Promise.all([sourcePlayer.opened, admin.opened]);
   sourcePlayer.send({ type: "create", mode: "online", name: "待合并", profileId: "profile-source" });
-  await sourcePlayer.waitFor((payload) => payload.type === "state" && payload.state.phase === "waiting");
+  const sourceRoom = await sourcePlayer.waitFor((payload) => payload.type === "state" && payload.state.phase === "waiting");
+  sourcePlayer.send({ type: "adminDeleteRoom", roomId: sourceRoom.state.roomId });
+  await sourcePlayer.waitFor((payload) => payload.type === "adminError");
   admin.send({ type: "adminLogin", password: "test-admin-password" });
   await admin.waitFor((payload) => payload.type === "adminData");
   admin.send({ type: "adminUpdatePlayer", playerId: "profile-guest", score: 5 });
@@ -115,6 +117,10 @@ test("大厅、房主踢人、托管重连和全员重开可以连贯完成", as
   const merged = await admin.waitFor((payload) => payload.type === "adminData" && payload.message?.startsWith("玩家记录已合并"));
   assert.equal(merged.data.players.find((player) => player.id === "profile-guest").score, 12);
   assert.equal(merged.data.players.some((player) => player.id === "profile-source"), false);
+  admin.send({ type: "adminDeleteRoom", roomId: sourceRoom.state.roomId });
+  await sourcePlayer.waitFor((payload) => payload.type === "roomClosed");
+  const afterRoomDelete = await admin.waitFor((payload) => payload.type === "lobbyRooms");
+  assert.equal(afterRoomDelete.rooms.some((room) => room.id === sourceRoom.state.roomId), false);
 
   host.close();
   returningGuest.close();

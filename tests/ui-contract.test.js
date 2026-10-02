@@ -179,3 +179,12 @@ test("空房间和结束房间由服务端定时解散并通知客户端", () =>
   assert.match(serverSource, /type: "roomClosed"/);
   assert.match(appSource, /payload\.type === "roomClosed"/);
 });
+
+test("当前玩家信息靠左且管理员可在大厅删除房间", () => {
+  assert.match(cssSource, /\.seat-bottom\s*\{[^}]*left:\s*4%;[^}]*transform:\s*none;/);
+  assert.match(appSource, /adminUnlocked[\s\S]*?data-directory-delete/);
+  assert.match(appSource, /type: "adminDeleteRoom"/);
+  assert.match(serverSource, /data\.type === "adminDeleteRoom"/);
+  assert.match(serverSource, /const roomSweepTimer = setInterval/);
+  assert.match(appSource, /lobbyRefreshTimer = setInterval/);
+});

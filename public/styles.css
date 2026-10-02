@@ -94,7 +94,8 @@ button { min-height: 44px; }
 .directory-status { justify-self: start; padding: 3px 6px; border: 1px solid rgba(255,255,255,.12); border-radius: 4px; color: #c8d8d1; font-size: 9px; }
 .status-waiting { border-color: rgba(101,200,149,.35); color: #89dcb2; }
 .status-playing { border-color: rgba(226,198,111,.35); color: #e2c66f; }
-.directory-row > button { min-width: 92px; }
+.directory-actions { display: grid; gap: 5px; width: 92px; }
+.directory-actions > button { width: 100%; min-width: 0; }
 button:disabled { cursor: default; opacity: .42; }
 
 button, .layout-menu summary {
@@ -216,7 +217,7 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 .route-drill { background: #70cfa8; }
 .route-pung { background: #e08175; }
 .seat-active .seat-head { border-color: #e0bd59; box-shadow: 0 0 0 2px rgba(224,189,89,.14); }
-.seat-bottom { left: 50%; bottom: calc(var(--hand-tile-height) + 54px); transform: translateX(-50%); }
+.seat-bottom { left: 4%; bottom: calc(var(--hand-tile-height) + 54px); transform: none; }
 .seat-top {
   left: 50%; top: 2%; width: calc(var(--opponent-tile-width) * 13 + 12px);
   height: calc(var(--opponent-tile-height) + 78px); transform: translateX(-50%);
@@ -497,7 +498,7 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 .layout-portrait .play-layout { min-height: 0; height: auto; }
 .layout-portrait .table-stage { padding: 2px 4px; }
 .layout-portrait .table { width: min(calc(100dvw - 8px), calc(100dvh - 190px)); height: auto; aspect-ratio: 1; max-height: 100%; }
-.layout-portrait .seat-bottom { bottom: 2%; }
+.layout-portrait .seat-bottom { left: 1%; bottom: 2%; }
 .layout-portrait .seat-top { top: 2%; }
 .layout-portrait .seat-left { left: 1%; }
 .layout-portrait .seat-right { right: 1%; }
@@ -593,7 +594,8 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
   .directory-backdrop { place-items: end center; padding: max(8px, env(safe-area-inset-top)) 0 0; }
   .directory-dialog { width: 100%; max-height: calc(100dvh - max(8px, env(safe-area-inset-top))); border-radius: 8px 8px 0 0; }
   .directory-row { grid-template-columns: minmax(0, 1fr) 82px; padding: 10px 14px; }
-  .directory-row > button { min-width: 82px; padding: 0 7px; }
+  .directory-actions { width: 82px; }
+  .directory-actions > button { padding: 0 7px; }
   .gamebar { max-width: calc(100dvw - 90px); }
   .game-identity small { max-width: 126px; overflow: hidden; text-overflow: ellipsis; }
   .admin-backdrop { place-items: end center; padding: max(8px, env(safe-area-inset-top)) 0 0; }

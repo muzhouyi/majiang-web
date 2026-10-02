@@ -613,12 +613,13 @@ function reconnectClient(room, client) {
 }
 
 function roomDirectory(profileId) {
+  sweepExpiredRooms();
   return [...rooms.values()]
     .filter((room) => room.mode === "online")
     .map((room) => {
       const hostSeat = room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId);
       const occupied = room.seats.filter(Boolean).length;
-      const humanSeats = room.seats.filter((seat) => seat && (!seat.isBot || seat.delegated)).length;
+      const humanSeats = connectedHumanCount(room);
       const canRejoin = delegatedSeatForProfile(room, profileId) !== -1;
       const canJoin = room.phase === "waiting" && room.seats.some((seat) => !seat || (seat.isBot && !seat.delegated));
       return {
@@ -629,7 +630,9 @@ function roomDirectory(profileId) {
         humanSeats,
         canJoin,
         canRejoin,
-        players: room.seats.filter(Boolean).map((seat) => seat.name)
+        players: room.seats.filter(Boolean).map((seat) => seat.isBot
+          ? `${seat.name}${seat.delegated ? "（托管）" : "（人机）"}`
+          : seat.name)
       };
     })
     .sort((a, b) => Number(b.canRejoin) - Number(a.canRejoin) || Number(b.canJoin) - Number(a.canJoin) || a.id.localeCompare(b.id));
@@ -1148,6 +1151,16 @@ function dissolveRoom(room, reason) {
   rooms.delete(room.id);
 }
 
+function sweepExpiredRooms(now = Date.now()) {
+  for (const room of [...rooms.values()]) {
+    if (connectedHumanCount(room) === 0 && !room.emptySince) {
+      room.emptySince = room.lastActivity || now;
+    }
+    const cleanup = roomCleanupDeadline(room, now);
+    if (cleanup && cleanup.deadline <= now) dissolveRoom(room, cleanup.reason);
+  }
+}
+
 function scheduleRoomCleanup(room) {
   clearRoomCleanupTimer(room);
   const noHumans = connectedHumanCount(room) === 0;
@@ -1279,7 +1292,7 @@ function roomSnapshot(room, viewerSeat) {
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   const viewerIsHost = viewer?.profileId === room.hostProfileId;
   return {
-    version: "2.7",
+    version: "2.8",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -1360,6 +1373,15 @@ function handleAdminMessage(client, data) {
   }
   if (data.type === "adminGet") {
     sendJson(client.socket, { type: "adminData", data: publicAdminData() });
+  } else if (data.type === "adminDeleteRoom") {
+    const roomId = String(data.roomId || "").trim().toUpperCase();
+    const room = rooms.get(roomId);
+    if (!room) {
+      sendJson(client.socket, { type: "adminError", message: "没有找到这个房间。" });
+      return true;
+    }
+    dissolveRoom(room, "管理员已解散房间。");
+    sendJson(client.socket, { type: "lobbyRooms", rooms: roomDirectory(client.profileId) });
   } else if (data.type === "adminUpdateScoring") {
     const incoming = data.scoring || {};
     adminData.scoring.dealerBase = numericSetting(incoming.dealerBase, adminData.scoring.dealerBase);
@@ -1689,6 +1711,9 @@ server.on("upgrade", (req, socket) => {
   });
 });
 
+const roomSweepTimer = setInterval(() => sweepExpiredRooms(), 5_000);
+roomSweepTimer.unref?.();
+
 if (require.main === module) {
   server.listen(PORT, () => {
     console.log(`Mahjong web game running at http://localhost:${PORT}`);
@@ -1714,5 +1739,6 @@ module.exports = {
   delegatedSeatForProfile,
   roomDirectory,
   roomCleanupDeadline,
+  sweepExpiredRooms,
   rooms
 };

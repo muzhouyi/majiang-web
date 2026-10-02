@@ -31,6 +31,7 @@ let adminTapCount = 0;
 let adminTapStartedAt = 0;
 let lobbyDirectoryOpen = false;
 let lobbyRooms = [];
+let lobbyRefreshTimer = null;
 let name = localStorage.getItem("majiang:name") || `玩家${Math.floor(Math.random() * 90) + 10}`;
 let profileId = localStorage.getItem(PROFILE_KEY);
 if (!profileId) {
@@ -56,7 +57,7 @@ function connect() {
     const payload = JSON.parse(event.data);
     if (payload.type === "state") {
       state = payload.state;
-      lobbyDirectoryOpen = false;
+      setLobbyDirectoryOpen(false);
       if (state.viewerProfileId && state.viewerProfileId !== profileId) {
         profileId = state.viewerProfileId;
         localStorage.setItem(PROFILE_KEY, profileId);
@@ -91,7 +92,6 @@ function connect() {
       toast = payload.message || "房间已自动解散。";
     } else if (payload.type === "lobbyRooms") {
       lobbyRooms = payload.rooms || [];
-      lobbyDirectoryOpen = true;
     } else if (payload.type === "error") {
       toast = payload.message;
       if (state?.roomId && payload.message === "没有找到这个房间。") state = null;
@@ -123,6 +123,17 @@ function send(payload) {
   else {
     toast = "还没有连上服务器，请稍等。";
     render();
+  }
+}
+
+function setLobbyDirectoryOpen(open) {
+  lobbyDirectoryOpen = open;
+  clearInterval(lobbyRefreshTimer);
+  lobbyRefreshTimer = null;
+  if (open) {
+    lobbyRefreshTimer = setInterval(() => {
+      if (lobbyDirectoryOpen) send({ type: "listRooms", profileId });
+    }, 5_000);
   }
 }
 
@@ -231,7 +242,10 @@ function renderLobbyDirectory() {
       : room.canJoin
         ? `<button type="button" data-directory-join="${escapeHtml(room.id)}">加入</button>`
         : '<button type="button" disabled>不可加入</button>';
-    return `<div class="directory-row"><div class="directory-room"><strong>${escapeHtml(room.id)}</strong><span class="directory-status status-${room.status}">${status}</span><small>房主 ${escapeHtml(room.hostName)} · 真人 ${room.humanSeats}/4</small><small>${escapeHtml(room.players.join(" / ") || "暂无玩家")}</small></div>${action}</div>`;
+    const deleteAction = adminUnlocked
+      ? `<button class="danger-quiet" type="button" data-directory-delete="${escapeHtml(room.id)}">删除</button>`
+      : "";
+    return `<div class="directory-row"><div class="directory-room"><strong>${escapeHtml(room.id)}</strong><span class="directory-status status-${room.status}">${status}</span><small>房主 ${escapeHtml(room.hostName)} · 真人 ${room.humanSeats}/4</small><small>${escapeHtml(room.players.join(" / ") || "暂无玩家")}</small></div><div class="directory-actions">${action}${deleteAction}</div></div>`;
   }).join("") : '<p class="admin-empty">当前还没有在线房间。</p>';
   return `<div class="directory-backdrop"><section class="directory-dialog" role="dialog" aria-modal="true" aria-labelledby="directoryTitle"><header><div><p class="eyebrow">在线房间</p><h2 id="directoryTitle">麻将大厅</h2></div><button type="button" data-directory-close aria-label="关闭">×</button></header><div class="directory-toolbar"><span>${lobbyRooms.length} 个房间</span><button type="button" data-directory-refresh>刷新</button></div><div class="directory-list">${rooms}</div></section></div>`;
 }
@@ -240,7 +254,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v2.7</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v2.8</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -264,10 +278,15 @@ function renderLobby() {
   });
   app.querySelector("#soloBtn").addEventListener("click", () => send({ type: "create", mode: "solo", name, profileId }));
   app.querySelector("#createBtn").addEventListener("click", () => send({ type: "create", mode: "online", name, profileId }));
-  app.querySelector("#directoryBtn").addEventListener("click", () => { lobbyDirectoryOpen = true; render(); send({ type: "listRooms", profileId }); });
-  app.querySelector("[data-directory-close]")?.addEventListener("click", () => { lobbyDirectoryOpen = false; render(); });
+  app.querySelector("#directoryBtn").addEventListener("click", () => { setLobbyDirectoryOpen(true); render(); send({ type: "listRooms", profileId }); });
+  app.querySelector("[data-directory-close]")?.addEventListener("click", () => { setLobbyDirectoryOpen(false); render(); });
   app.querySelector("[data-directory-refresh]")?.addEventListener("click", () => send({ type: "listRooms", profileId }));
   app.querySelectorAll("[data-directory-join]").forEach((button) => button.addEventListener("click", () => send({ type: "join", roomId: button.dataset.directoryJoin, name, profileId })));
+  app.querySelectorAll("[data-directory-delete]").forEach((button) => button.addEventListener("click", () => {
+    if (window.confirm(`确定删除房间 ${button.dataset.directoryDelete} 吗？房间内的牌局会立即结束。`)) {
+      send({ type: "adminDeleteRoom", roomId: button.dataset.directoryDelete });
+    }
+  }));
   app.querySelector("#lobbyForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const roomId = app.querySelector("#roomInput").value.trim().toUpperCase();
@@ -397,7 +416,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.7</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.8</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
