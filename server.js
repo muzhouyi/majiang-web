@@ -28,6 +28,7 @@ const tileIndex = new Map(tileTypes.map((tile, index) => [tile, index]));
 const winds = ["东", "南", "西", "北"];
 const botNames = ["阿庄", "小竹", "南风", "青雀"];
 const defaultPatternPoints = {
+  "普通胡": 1,
   "清一色": 8,
   "七对": 4,
   "豪华七对": 6,
@@ -42,13 +43,12 @@ const defaultPatternPoints = {
 
 const defaultAdminData = {
   scoring: {
-    dealerBase: 2,
-    nonDealerBase: 1,
-    selfDrawMultiplier: 2,
-    discardMultiplier: 3,
+    baseMultiplier: 1,
+    dealerMultiplierBonus: 1,
+    selfDrawMultiplierBonus: 1,
     discardPayerOnly: true,
     patterns: defaultPatternPoints,
-    actions: { "明杠": 0, "暗杠": 0 }
+    actions: { "明杠": 1, "暗杠": 2, "补杠": 1 }
   },
   replay: { enabled: true },
   gameplay: { botTakeoverOnDisconnect: false },
@@ -348,7 +348,7 @@ function hasOneDragon(tiles) {
 function evaluateWin(player, concealedHand) {
   const melds = player.melds || [];
   const shape = standardShape(concealedHand, melds.length);
-  const tripletMeldTypes = new Set(["pong", "concealed-pong", "exposed-kong", "concealed-kong"]);
+  const tripletMeldTypes = new Set(["pong", "concealed-pong", "exposed-kong", "concealed-kong", "supplemental-kong"]);
   const exposedTriplets = melds.filter((meld) => tripletMeldTypes.has(meld.type)).length;
   const tripletCount = shape ? shape.triplets + exposedTriplets : 0;
   const allTiles = playerTiles(player, concealedHand);
@@ -442,22 +442,52 @@ function concealedKongOptions(player) {
     .map((tile) => ({ key: `concealed-kong:${tile}`, tile, label: `暗杠 · ${tileName(tile)}` }));
 }
 
-function settleKongPoints(room, winnerSeat, kind) {
-  const points = Number(adminData.scoring.actions[kind]) || 0;
-  if (!points) return;
-  const winner = room.seats[winnerSeat];
-  const scoreChanges = [0, 0, 0, 0];
-  for (let seat = 0; seat < 4; seat += 1) {
-    if (seat === winnerSeat) continue;
-    room.seats[seat].score -= points;
-    room.seats[seat].roundDelta -= points;
-    winner.score += points;
-    winner.roundDelta += points;
-    scoreChanges[seat] -= points;
-    scoreChanges[winnerSeat] += points;
+function supplementalKongOptions(player) {
+  if (!player?.drawnTile || !player.drawnTileId) return [];
+  return player.melds
+    .filter((meld) => meld.type === "pong" && meld.tiles[0] === player.drawnTile && player.handTileIds.includes(player.drawnTileId))
+    .map((meld) => ({
+      key: `supplemental-kong:${meld.id}`,
+      meldId: meld.id,
+      tile: meld.tiles[0],
+      tileId: player.drawnTileId,
+      label: `补杠 · ${tileName(meld.tiles[0])}`
+    }));
+}
+
+function recordKongEvent(room, ownerSeat, kind, fromSeat = null) {
+  room.kongEvents ||= [];
+  room.kongEvents.push({ id: makeId(8), ownerSeat, kind, fromSeat });
+  addLog(room, `${room.seats[ownerSeat].name} 的${kind}已记录，本局结束时统一结算。`);
+}
+
+function winnerMultiplier(room, winnerSeat, method) {
+  const scoring = adminData.scoring;
+  return (Number(scoring.baseMultiplier) || 0)
+    + (winnerSeat === room.dealerSeat ? (Number(scoring.dealerMultiplierBonus) || 0) : 0)
+    + (method === "自摸" ? (Number(scoring.selfDrawMultiplierBonus) || 0) : 0);
+}
+
+function kongSettlement(room, winnerSeat = null, method = null) {
+  const deltas = [0, 0, 0, 0];
+  const earned = [0, 0, 0, 0];
+  const details = [];
+  for (const event of room.kongEvents || []) {
+    const unit = Number(adminData.scoring.actions[event.kind]) || 0;
+    if (!unit) continue;
+    const multiplier = event.ownerSeat === winnerSeat ? winnerMultiplier(room, winnerSeat, method) : 1;
+    const payment = unit * multiplier;
+    const payers = event.kind === "明杠" && Number.isInteger(event.fromSeat)
+      ? [event.fromSeat]
+      : [0, 1, 2, 3].filter((seat) => seat !== event.ownerSeat);
+    for (const payer of payers) {
+      deltas[payer] -= payment;
+      deltas[event.ownerSeat] += payment;
+      earned[event.ownerSeat] += payment;
+    }
+    details.push({ name: `${room.seats[event.ownerSeat].name}·${event.kind}`, points: payment * payers.length });
   }
-  persistHumanScores(room, scoreChanges, kind);
-  addLog(room, `${winner.name} ${kind}结算，每家支付${points}分。`);
+  return { deltas, earned, details };
 }
 
 function declareConcealedKong(room, seat, key) {
@@ -481,7 +511,32 @@ function declareConcealedKong(room, seat, key) {
   player.lastDrawnTile = null;
   player.drewAfterKong = false;
   addLog(room, `${player.name} 明示暗杠，牌面保持隐藏。`);
-  settleKongPoints(room, seat, "暗杠");
+  recordKongEvent(room, seat, "暗杠");
+  drawForCurrent(room, true);
+  return true;
+}
+
+function declareSupplementalKong(room, seat, key) {
+  if (room.winner || room.phase !== "discard" || room.currentSeat !== seat) return false;
+  const player = room.seats[seat];
+  const option = supplementalKongOptions(player).find((entry) => entry.key === key);
+  if (!option) return false;
+  const meld = player.melds.find((entry) => entry.id === option.meldId && entry.type === "pong");
+  if (!meld) return false;
+  pushUndoCheckpoint(room, "补杠");
+  const drawnIndex = player.handTileIds.indexOf(option.tileId);
+  if (drawnIndex === -1 || player.hand[drawnIndex] !== option.tile) return false;
+  player.hand.splice(drawnIndex, 1);
+  player.handTileIds.splice(drawnIndex, 1);
+  meld.type = "supplemental-kong";
+  meld.tiles.push(option.tile);
+  meld.tileIds.push(option.tileId);
+  player.drawnTile = null;
+  player.drawnTileId = null;
+  player.lastDrawnTile = null;
+  player.drewAfterKong = false;
+  addLog(room, `${player.name} 摸到${tileName(option.tile)}，将此前碰牌补成补杠。`);
+  recordKongEvent(room, seat, "补杠");
   drawForCurrent(room, true);
   return true;
 }
@@ -490,10 +545,9 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
   const winner = room.seats[winnerSeat];
   const evaluation = evaluateWin(winner, winner.hand);
   const scoring = adminData.scoring;
-  const isDealer = winnerSeat === room.dealerSeat;
-  const base = isDealer ? scoring.dealerBase : scoring.nonDealerBase;
-  const items = [{ name: isDealer ? "庄家底分" : "闲家底分", points: base }];
-  let handPoints = base;
+  const items = [];
+  let handPoints = Number(scoring.patterns["普通胡"]) || 0;
+  items.push({ name: "普通胡", points: handPoints });
   for (const pattern of evaluation.patterns) {
     const points = scoring.patterns[pattern] || 0;
     handPoints += points;
@@ -506,11 +560,10 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
     evaluation.patterns.push("杠上开花");
   }
 
-  let payment = handPoints;
-  if (method === "自摸") {
-    payment *= scoring.selfDrawMultiplier;
-    items.push({ name: "自摸翻倍", points: payment });
-  }
+  const multiplier = winnerMultiplier(room, winnerSeat, method);
+  const payment = handPoints * multiplier;
+  items.push({ name: "胡法分小计", points: handPoints });
+  items.push({ name: `总倍率（基础${scoring.baseMultiplier}+庄家${winnerSeat === room.dealerSeat ? scoring.dealerMultiplierBonus : 0}+自摸${method === "自摸" ? scoring.selfDrawMultiplierBonus : 0}）`, points: multiplier });
 
   const deltas = [0, 0, 0, 0];
   if (method === "自摸") {
@@ -522,10 +575,9 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
   } else {
     const payer = typeof fromSeat === "number" ? fromSeat : room.pendingClaim?.fromSeat;
     if (scoring.discardPayerOnly !== false) {
-      const totalPayment = payment * scoring.discardMultiplier;
-      deltas[payer] -= totalPayment;
-      deltas[winnerSeat] += totalPayment;
-      items.push({ name: "仅点炮者扣分", points: totalPayment });
+      deltas[payer] -= payment;
+      deltas[winnerSeat] += payment;
+      items.push({ name: "仅点炮者支付", points: payment });
     } else {
       for (let seat = 0; seat < 4; seat += 1) {
         if (seat === winnerSeat) continue;
@@ -535,6 +587,11 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
       items.push({ name: "其余三家各付", points: payment });
     }
   }
+
+  const kong = kongSettlement(room, winnerSeat, method);
+  for (let seat = 0; seat < 4; seat += 1) deltas[seat] += kong.deltas[seat];
+  if (kong.earned[winnerSeat]) items.push({ name: "赢家其他得分（已乘总倍率）", points: kong.earned[winnerSeat] });
+  items.push(...kong.details);
 
   for (let seat = 0; seat < 4; seat += 1) {
     room.seats[seat].score += deltas[seat];
@@ -548,7 +605,8 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
     method,
     winningTile,
     patterns: evaluation.patterns,
-    base,
+    base: Number(scoring.baseMultiplier) || 0,
+    multiplier,
     payment,
     deltas,
     items,
@@ -598,6 +656,7 @@ function createRoom(hostClient, mode) {
     lastDiscard: null,
     winner: null,
     roundResult: null,
+    kongEvents: [],
     pendingClaim: null,
     log: [],
     logSequence: 0,
@@ -755,6 +814,7 @@ function startGame(room) {
   room.lastDiscard = null;
   room.winner = null;
   room.roundResult = null;
+  room.kongEvents = [];
   room.pendingClaim = null;
   room.restartVote = null;
   room.undoVote = null;
@@ -820,7 +880,17 @@ function drawForCurrent(room, afterKong = false) {
   if (!instance) {
     room.phase = "ended";
     room.winner = { type: "draw", text: "荒庄，牌墙摸完了。" };
-    room.roundResult = { text: "荒庄，本局不结算。", deltas: [0, 0, 0, 0], items: [] };
+    const kong = kongSettlement(room);
+    for (let seat = 0; seat < 4; seat += 1) {
+      room.seats[seat].score += kong.deltas[seat];
+      room.seats[seat].roundDelta = kong.deltas[seat];
+    }
+    persistHumanScores(room, kong.deltas, "荒庄杠牌结算");
+    room.roundResult = {
+      text: kong.details.length ? "荒庄，胡牌不计分，杠牌统一结算。" : "荒庄，本局无积分变动。",
+      deltas: kong.deltas,
+      items: kong.details
+    };
     addLog(room, room.winner.text);
     finalizeReplay(room);
     room.lastActivity = Date.now();
@@ -838,7 +908,7 @@ function drawForCurrent(room, afterKong = false) {
   room.phase = "discard";
   addLog(room, `${player.name}${afterKong ? " 杠后补牌。" : " 摸牌。"}`);
 
-  if (player.isBot) makeBotDeclarations(room, room.currentSeat);
+  if (player.isBot && makeBotDeclarations(room, room.currentSeat)) return;
   if (evaluateWin(player, player.hand).valid && player.isBot) {
     endWithWinner(room, room.currentSeat, "自摸", player.lastDrawnTile, null, player.drewAfterKong);
     return;
@@ -850,6 +920,11 @@ function drawForCurrent(room, afterKong = false) {
 
 function makeBotDeclarations(room, seat) {
   const player = room.seats[seat];
+  const supplemental = supplementalKongOptions(player)[0];
+  if (supplemental) {
+    declareSupplementalKong(room, seat, supplemental.key);
+    return true;
+  }
   const drillOptions = drillCompletionOptions(player);
   if (drillOptions.length && (player.route === "drill" || (!player.route && Math.random() < 0.28))) {
     declareCompletedDrill(room, seat, drillOptions[0].key, true);
@@ -859,6 +934,7 @@ function makeBotDeclarations(room, seat) {
   if (concealedStack && (player.route === "pung" || (!player.route && Math.random() < 0.18))) {
     declarePungStack(room, seat, concealedStack.key, true);
   }
+  return false;
 }
 
 function pushUndoCheckpoint(room, label) {
@@ -878,6 +954,7 @@ function pushUndoCheckpoint(room, label) {
       lastDiscard: room.lastDiscard,
       winner: room.winner,
       roundResult: room.roundResult,
+      kongEvents: room.kongEvents,
       pendingClaim: room.pendingClaim,
       log: room.log,
       logSequence: room.logSequence,
@@ -1026,8 +1103,10 @@ function scheduleBotClaim(room) {
   room.timer = setTimeout(() => {
     if (!room.pendingClaim || !room.pendingClaim.responders.includes(botSeat)) return;
     if (room.pendingClaim.stage === "ron") claimRon(room, botSeat);
-    else if (claim.kongResponders?.includes(botSeat) && Math.random() < 0.32) claimKong(room, botSeat);
-    else if (room.seats[botSeat].route !== "drill" && Math.random() < 0.72) claimPong(room, botSeat);
+    else if (claim.kongResponders?.includes(botSeat)) {
+      if (Math.random() < 0.32) claimKong(room, botSeat);
+      else passClaim(room, botSeat);
+    } else if (room.seats[botSeat].route !== "drill" && Math.random() < 0.72) claimPong(room, botSeat);
     else passClaim(room, botSeat);
   }, 360 + Math.random() * 320);
 }
@@ -1049,6 +1128,7 @@ function passClaim(room, seat) {
 function claimPong(room, seat) {
   const claim = room.pendingClaim;
   if (!claim || claim.stage !== "pong" || !claim.responders.includes(seat)) return false;
+  if (claim.kongResponders?.includes(seat)) return false;
   const player = room.seats[seat];
   const removed = removeHandTiles(player, [claim.tile, claim.tile]);
   if (!removed) return false;
@@ -1086,6 +1166,7 @@ function claimPong(room, seat) {
 function claimKong(room, seat) {
   const claim = room.pendingClaim;
   if (!claim || claim.stage !== "pong" || !claim.kongResponders?.includes(seat)) return false;
+  const fromSeat = claim.fromSeat;
   const player = room.seats[seat];
   const removed = removeHandTiles(player, [claim.tile, claim.tile, claim.tile]);
   if (!removed) return false;
@@ -1107,7 +1188,7 @@ function claimKong(room, seat) {
   room.pendingClaim = null;
   room.lastDiscard = null;
   addLog(room, `${player.name} 明杠了${tileName(claim.tile)}，四张牌亮出。`);
-  settleKongPoints(room, seat, "明杠");
+  recordKongEvent(room, seat, "明杠", fromSeat);
   drawForCurrent(room, true);
   return true;
 }
@@ -1349,7 +1430,7 @@ function handDistance(player, hand) {
     return { shanten: standard + drillsNeeded, shape: "钻胡" };
   }
   if (player.route === "pung") {
-    const tripletTypes = new Set(["pong", "concealed-pong", "exposed-kong", "concealed-kong"]);
+  const tripletTypes = new Set(["pong", "concealed-pong", "exposed-kong", "concealed-kong", "supplemental-kong"]);
     const fixedTriplets = melds.filter((meld) => tripletTypes.has(meld.type)).length;
     const handTriplets = tileCounts(hand).filter((count) => count >= 3).length;
     const tripletsNeeded = Math.max(0, 3 - fixedTriplets - handTriplets);
@@ -1374,7 +1455,7 @@ function distanceForShape(player, hand, shape) {
   const standard = standardShanten(hand, melds.length);
   if (shape === "钻胡") return standard + Math.max(0, 3 - melds.filter((meld) => meld.type === "drill").length);
   if (shape === "三碰/四碰") {
-    const tripletTypes = new Set(["pong", "concealed-pong", "exposed-kong", "concealed-kong"]);
+    const tripletTypes = new Set(["pong", "concealed-pong", "exposed-kong", "concealed-kong", "supplemental-kong"]);
     const triplets = melds.filter((meld) => tripletTypes.has(meld.type)).length
       + tileCounts(hand).filter((count) => count >= 3).length;
     return standard + Math.max(0, 3 - triplets);
@@ -1391,10 +1472,10 @@ function estimatedSelfDrawGain(room, seat, player, hand, gangShangKaiHua = false
   const evaluation = evaluateWin(player, hand);
   if (!evaluation.valid) return 0;
   const scoring = adminData.scoring;
-  let points = seat === room.dealerSeat ? scoring.dealerBase : scoring.nonDealerBase;
+  let points = Number(scoring.patterns["普通胡"]) || 0;
   for (const pattern of evaluation.patterns) points += scoring.patterns[pattern] || 0;
   if (gangShangKaiHua) points += scoring.patterns["杠上开花"] || 0;
-  return points * scoring.selfDrawMultiplier * 3;
+  return points * winnerMultiplier(room, seat, "自摸") * 3;
 }
 
 function concealedKongPaths(room, seat, player, hand) {
@@ -1895,7 +1976,7 @@ function roomSnapshot(room, viewerSeat) {
       })()
       : null;
   return {
-    version: "3.6",
+    version: "3.7",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -1915,7 +1996,7 @@ function roomSnapshot(room, viewerSeat) {
     winner: room.winner,
     roundResult: room.roundResult,
     canRon: isResponder && claim.stage === "ron",
-    canPong: isResponder && claim.stage === "pong",
+    canPong: isResponder && claim.stage === "pong" && !claim.kongResponders?.includes(viewerSeat),
     canKong: isResponder && claim.stage === "pong" && claim.kongResponders?.includes(viewerSeat),
     canPass: isResponder,
     canDiscard: viewerTurn,
@@ -1934,6 +2015,7 @@ function roomSnapshot(room, viewerSeat) {
     } : null,
     canSelfWin: viewerTurn && evaluateWin(viewer, viewer?.hand || []).valid,
     concealedKongOptions: viewerTurn ? concealedKongOptions(viewer) : [],
+    supplementalKongOptions: viewerTurn ? supplementalKongOptions(viewer) : [],
     drillOptions: viewerTurn ? drillCompletionOptions(viewer) : [],
     stackOptions: !room.winner && room.phase !== "waiting" ? stackOptions(viewer) : [],
     players: room.seats.map((seat, index) => seat ? {
@@ -1996,15 +2078,14 @@ function handleAdminMessage(client, data) {
     sendJson(client.socket, { type: "lobbyRooms", rooms: roomDirectory(client.profileId) });
   } else if (data.type === "adminUpdateScoring") {
     const incoming = data.scoring || {};
-    adminData.scoring.dealerBase = numericSetting(incoming.dealerBase, adminData.scoring.dealerBase);
-    adminData.scoring.nonDealerBase = numericSetting(incoming.nonDealerBase, adminData.scoring.nonDealerBase);
-    adminData.scoring.selfDrawMultiplier = numericSetting(incoming.selfDrawMultiplier, adminData.scoring.selfDrawMultiplier, 1, 20);
-    adminData.scoring.discardMultiplier = numericSetting(incoming.discardMultiplier, adminData.scoring.discardMultiplier, 1, 20);
+    adminData.scoring.baseMultiplier = numericSetting(incoming.baseMultiplier, adminData.scoring.baseMultiplier, 1, 20);
+    adminData.scoring.dealerMultiplierBonus = numericSetting(incoming.dealerMultiplierBonus, adminData.scoring.dealerMultiplierBonus, 0, 20);
+    adminData.scoring.selfDrawMultiplierBonus = numericSetting(incoming.selfDrawMultiplierBonus, adminData.scoring.selfDrawMultiplierBonus, 0, 20);
     adminData.scoring.discardPayerOnly = incoming.discardPayerOnly !== false;
     for (const key of Object.keys(defaultPatternPoints)) {
       adminData.scoring.patterns[key] = numericSetting(incoming.patterns?.[key], adminData.scoring.patterns[key]);
     }
-    for (const key of ["明杠", "暗杠"]) {
+    for (const key of ["明杠", "暗杠", "补杠"]) {
       adminData.scoring.actions[key] = numericSetting(incoming.actions?.[key], adminData.scoring.actions[key]);
     }
     saveAdminData();
@@ -2273,6 +2354,8 @@ function handleMessage(client, message) {
       declarePungStack(room, client.seat, String(data.key || ""));
     } else if (data.type === "concealedKong") {
       declareConcealedKong(room, client.seat, String(data.key || ""));
+    } else if (data.type === "supplementalKong") {
+      declareSupplementalKong(room, client.seat, String(data.key || ""));
     } else if (data.type === "selfWin" && room.currentSeat === client.seat) {
       const player = room.seats[client.seat];
       endWithWinner(room, client.seat, "自摸", player.lastDrawnTile, null, player.drewAfterKong);
@@ -2400,6 +2483,7 @@ module.exports = {
   evaluateWin,
   drillCompletionOptions,
   concealedKongOptions,
+  supplementalKongOptions,
   rollForDealer,
   recommendDiscard,
   makePlayer,

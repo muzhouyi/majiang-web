@@ -234,3 +234,16 @@ test("管理员可控制掉线托管并在自己的回合请求出牌建议", ()
   assert.match(serverSource, /botTakeoverOnDisconnect: false/);
   assert.match(serverSource, /function recommendDiscard/);
 });
+
+test("补杠、直接杠优先与局末统一结算均由服务端约束", () => {
+  assert.match(appSource, /data-supplemental-kong/);
+  assert.match(serverSource, /function declareSupplementalKong/);
+  assert.match(serverSource, /if \(claim\.kongResponders\?\.includes\(seat\)\) return false;/);
+  assert.match(serverSource, /function recordKongEvent/);
+  assert.match(serverSource, /function kongSettlement/);
+  assert.doesNotMatch(serverSource, /function settleKongPoints/);
+  assert.match(appSource, /基础倍率/);
+  assert.match(appSource, /庄家倍率加成/);
+  assert.match(appSource, /自摸倍率加成/);
+  assert.match(appSource, /局结束时统一结算/);
+});

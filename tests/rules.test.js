@@ -13,6 +13,7 @@ const {
   evaluateWin,
   drillCompletionOptions,
   concealedKongOptions,
+  supplementalKongOptions,
   rollForDealer,
   recommendDiscard,
   makePlayer,
@@ -166,6 +167,19 @@ test("暗杠必须由手中四张相同牌组成", () => {
   player.hand.pop();
   player.hand.pop();
   assert.equal(concealedKongOptions(player).length, 0);
+});
+
+test("补杠只在碰牌后自己新摸到第四张时出现", () => {
+  const player = playerWith(["m4", "p2"], {
+    melds: [{ id: "pong-m4", type: "pong", tiles: ["m4", "m4", "m4"], tileIds: ["a", "b", "c"] }],
+    drawnTile: "m4"
+  });
+  player.handTileIds = ["drawn-m4", "p2-id"];
+  player.drawnTileId = "drawn-m4";
+  assert.deepEqual(supplementalKongOptions(player).map((option) => option.tile), ["m4"]);
+
+  player.drawnTileId = null;
+  assert.deepEqual(supplementalKongOptions(player), []);
 });
 
 test("明杠和暗杠均按三碰四碰路线中的一组刻子计算", () => {

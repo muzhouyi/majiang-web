@@ -266,7 +266,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v3.6</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v3.7</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -371,18 +371,18 @@ function numberField(label, key, value, group = "root", note = "") {
 
 function renderAdminScoring() {
   const scoring = adminData.scoring;
-  const patterns = ["清一色", "七对", "豪华七对", "一条龙", "十三不靠", "十三幺", "三碰胡", "四碰胡", "钻胡", "杠上开花"];
+  const patterns = ["普通胡", "清一色", "七对", "豪华七对", "一条龙", "十三不靠", "十三幺", "三碰胡", "四碰胡", "钻胡", "杠上开花"];
   return `<form class="admin-form" id="adminScoringForm">
     <section class="admin-section"><h3>基础结算</h3><div class="admin-number-grid">
-      ${numberField("庄家底分", "dealerBase", scoring.dealerBase)}
-      ${numberField("闲家底分", "nonDealerBase", scoring.nonDealerBase)}
-      ${numberField("自摸倍数", "selfDrawMultiplier", scoring.selfDrawMultiplier)}
-      ${numberField("点炮包付倍数", "discardMultiplier", scoring.discardMultiplier)}
-    </div><label class="admin-toggle scoring-toggle"><span><strong>仅点炮者扣分</strong><small>开启后由打出胡牌张的玩家按点炮倍数包付；关闭后其余三家各付一份基础牌分。</small></span><input type="checkbox" data-discard-payer-only ${scoring.discardPayerOnly !== false ? "checked" : ""} /></label></section>
+      ${numberField("基础倍率", "baseMultiplier", scoring.baseMultiplier)}
+      ${numberField("庄家倍率加成", "dealerMultiplierBonus", scoring.dealerMultiplierBonus)}
+      ${numberField("自摸倍率加成", "selfDrawMultiplierBonus", scoring.selfDrawMultiplierBonus)}
+    </div><p class="admin-note">赢家总分按“（各胡法分＋其他得分）×（基础倍率＋庄家加成＋自摸加成）”计算。庄家加成填 1 时，连同基础倍率 1 即为两倍。</p><label class="admin-toggle scoring-toggle"><span><strong>仅点炮者扣分</strong><small>开启后只由打出胡牌张的玩家支付；关闭后其余三家各付一份赢家牌分。</small></span><input type="checkbox" data-discard-payer-only ${scoring.discardPayerOnly !== false ? "checked" : ""} /></label></section>
     <section class="admin-section"><h3>胡牌积分</h3><div class="admin-number-grid">${patterns.map((name) => numberField(name, name, scoring.patterns[name], "patterns")).join("")}</div></section>
-    <section class="admin-section"><h3>杠牌积分</h3><p class="admin-note">每次杠牌即时结算，其余三家各支付所填分值；填 0 表示只记录、不计分。</p><div class="admin-number-grid">
+    <section class="admin-section"><h3>杠牌积分</h3><p class="admin-note">所有杠在本局结束时统一结算。明杠由放杠者支付；暗杠和补杠由其余三家分别支付。赢家的杠分计入“其他得分”并随总倍率计算。</p><div class="admin-number-grid">
       ${numberField("明杠", "明杠", scoring.actions["明杠"], "actions")}
       ${numberField("暗杠", "暗杠", scoring.actions["暗杠"], "actions")}
+      ${numberField("补杠", "补杠", scoring.actions["补杠"], "actions")}
     </div></section>
     <div class="admin-savebar"><button class="primary" type="submit">保存积分设置</button></div>
   </form>`;
@@ -431,7 +431,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.6</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v3.7</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
@@ -594,6 +594,9 @@ function renderActions() {
   for (const option of state.concealedKongOptions || []) {
     buttons.push(`<button class="declare kong" type="button" data-concealed-kong="${escapeHtml(option.key)}">${escapeHtml(option.label)}</button>`);
   }
+  for (const option of state.supplementalKongOptions || []) {
+    buttons.push(`<button class="declare kong" type="button" data-supplemental-kong="${escapeHtml(option.key)}">${escapeHtml(option.label)}</button>`);
+  }
   return buttons.length ? buttons.join("") : `<span class="action-idle">${state.winner ? "本局已结算" : "等待牌局动作"}</span>`;
 }
 
@@ -704,6 +707,7 @@ function bindGameEvents() {
   app.querySelectorAll("[data-declare-drill]").forEach((button) => button.addEventListener("click", () => send({ type: "declareDrill", key: button.dataset.declareDrill })));
   app.querySelectorAll("[data-declare-pung]").forEach((button) => button.addEventListener("click", () => send({ type: "declarePung", key: button.dataset.declarePung })));
   app.querySelectorAll("[data-concealed-kong]").forEach((button) => button.addEventListener("click", () => send({ type: "concealedKong", key: button.dataset.concealedKong })));
+  app.querySelectorAll("[data-supplemental-kong]").forEach((button) => button.addEventListener("click", () => send({ type: "supplementalKong", key: button.dataset.supplementalKong })));
   app.querySelectorAll("[data-action]").forEach((button) => {
     button.addEventListener("click", async () => {
       const action = button.dataset.action;
