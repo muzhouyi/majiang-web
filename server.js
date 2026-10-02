@@ -414,6 +414,7 @@ function createRoom(hostClient, mode) {
     roundResult: null,
     pendingClaim: null,
     log: [],
+    logSequence: 0,
     timer: null
   };
   rooms.set(id, room);
@@ -465,6 +466,8 @@ function startGame(room) {
   }
 
   clearRoomTimer(room);
+  room.log = [];
+  room.logSequence = 0;
   room.wall = makeDeck();
   room.currentSeat = 0;
   room.phase = "playing";
@@ -790,8 +793,8 @@ function chooseBotDiscard(player) {
 }
 
 function addLog(room, text) {
-  room.log.unshift({ time: Date.now(), text });
-  room.log = room.log.slice(0, 24);
+  room.logSequence = (room.logSequence || 0) + 1;
+  room.log.unshift({ step: room.logSequence, time: Date.now(), text });
 }
 
 function windName(seat) {
@@ -852,7 +855,7 @@ function roomSnapshot(room, viewerSeat) {
   const isResponder = Boolean(claim && claim.responders.includes(viewerSeat) && !claim.passed.includes(viewerSeat));
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   return {
-    version: "2.1",
+    version: "2.2",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat && seat.id === room.hostId),

@@ -63,3 +63,27 @@ test("碰、钻了和上摞动作都会写入牌局记录", () => {
   assert.match(serverSource, /addLog\(room, `\$\{player\.name\} 明示上摞/);
   assert.match(serverSource, /if \(meld\.stacked\) addLog\(room, `\$\{player\.name\} 按上摞路线/);
 });
+
+test("三名对手的信息条、牌背和明示牌使用独立定位层", () => {
+  assert.match(appSource, /class="opponent-rack"/);
+  assert.match(appSource, /class="opponent-melds"/);
+  assert.match(cssSource, /\.seat-top \.seat-head\s*\{[^}]*left: 50%;[^}]*top: 0/);
+  assert.match(cssSource, /\.seat-left \.opponent-hand, \.seat-right \.opponent-hand\s*\{[\s\S]*?grid-template-rows: repeat\(13/);
+  assert.match(cssSource, /\.seat-left \.opponent-melds\s*\{[\s\S]*?rotate\(90deg\)/);
+  assert.match(cssSource, /\.seat-right \.opponent-melds\s*\{[\s\S]*?rotate\(-90deg\)/);
+});
+
+test("横屏牌局内容只通过点击浮层显示", () => {
+  assert.match(cssSource, /\.info-rail\s*\{ display: none; \}/);
+  assert.doesNotMatch(cssSource, /\.layout-landscape \.info-rail\s*\{ display: block/);
+  assert.match(cssSource, /\.layout-landscape \.mobile-info\s*\{[\s\S]*?display: block/);
+});
+
+test("牌局记录保留时间步骤号并将最新消息显示在上方", () => {
+  assert.match(serverSource, /logSequence: 0/);
+  assert.match(serverSource, /room\.log = \[\];\s*room\.logSequence = 0;\s*room\.wall = makeDeck\(\)/);
+  assert.match(serverSource, /room\.log\.unshift\(\{ step: room\.logSequence/);
+  assert.doesNotMatch(serverSource, /room\.log = room\.log\.slice\(0, 24\)/);
+  assert.match(appSource, /<ol reversed>/);
+  assert.match(appSource, /<li value="\$\{entry\.step/);
+});

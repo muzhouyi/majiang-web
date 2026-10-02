@@ -167,7 +167,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <div class="brand-mark">${renderTile("C")}</div>
-      <div><p class="eyebrow">东光规则 · v2.1</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v2.2</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -260,9 +260,9 @@ function renderSeat(player) {
   const active = state.currentSeat === player.seat && !state.winner;
   const isSelf = player.seat === state.viewerSeat;
   const route = player.routeLabel ? `<span class="route-badge route-${player.route}">${player.routeLabel}</span>` : "";
+  const head = `<div class="seat-head"><span class="wind">${player.wind}</span><strong>${escapeHtml(player.name)}</strong>${route}<em>${player.score}</em></div>`;
   return `<section class="seat seat-${position} ${active ? "seat-active" : ""} ${isSelf ? "seat-self" : ""}">
-    <div class="seat-head"><span class="wind">${player.wind}</span><strong>${escapeHtml(player.name)}</strong>${route}<em>${player.score}</em></div>
-    ${isSelf ? "" : `<div class="opponent-hand">${renderBackTiles(player.handCount)}</div>${renderMelds(player.melds)}`}
+    ${isSelf ? head : `<div class="opponent-rack">${head}<div class="opponent-melds">${renderMelds(player.melds)}</div><div class="opponent-hand">${renderBackTiles(player.handCount)}</div></div>`}
   </section>`;
 }
 
@@ -313,10 +313,11 @@ function renderActions() {
 }
 
 function renderInfoContent() {
+  const fallbackStep = state.log.length;
   return `<section class="room-panel"><div><small>房间号</small><strong>${state.roomId}</strong></div><button type="button" data-action="copy">复制</button><button class="danger-quiet" type="button" data-action="leave">退出房间</button></section>
     ${renderResult()}
     <section class="score-panel"><h2>积分</h2>${state.players.filter(Boolean).map(renderScore).join("")}</section>
-    <details class="log-panel" open><summary>牌局记录</summary><ol>${state.log.map((entry) => `<li>${escapeHtml(entry.text)}</li>`).join("")}</ol></details>`;
+    <details class="log-panel" open><summary>牌局记录</summary><ol reversed>${state.log.map((entry, index) => `<li value="${entry.step || fallbackStep - index}">${escapeHtml(entry.text)}</li>`).join("")}</ol></details>`;
 }
 
 function renderScore(player) {
