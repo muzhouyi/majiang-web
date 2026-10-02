@@ -46,7 +46,9 @@ function makeId(length = 6) {
 function makeDeck() {
   const deck = [];
   for (const tile of tileTypes) {
-    for (let copy = 0; copy < 4; copy += 1) deck.push(tile);
+    for (let copy = 0; copy < 4; copy += 1) {
+      deck.push({ tile, tileId: makeId(12) });
+    }
   }
   for (let index = deck.length - 1; index > 0; index -= 1) {
     const target = Math.floor(Math.random() * (index + 1));
@@ -87,6 +89,28 @@ function removeTiles(hand, tiles) {
     hand.splice(index, 1);
   }
   return true;
+}
+
+function removeHandTiles(player, tiles) {
+  const removed = [];
+  for (const tile of tiles) {
+    const index = player.hand.indexOf(tile);
+    if (index === -1) return null;
+    removed.push({ tile, tileId: player.handTileIds[index] });
+    player.hand.splice(index, 1);
+    player.handTileIds.splice(index, 1);
+  }
+  return removed;
+}
+
+function sortedPhysicalHand(player) {
+  return player.hand
+    .map((tile, index) => ({ tile, tileId: player.handTileIds[index] }))
+    .sort((a, b) => {
+      if (a.tileId === player.drawnTileId) return 1;
+      if (b.tileId === player.drawnTileId) return -1;
+      return tileIndex.get(a.tile) - tileIndex.get(b.tile);
+    });
 }
 
 function tileName(tile) {
@@ -353,9 +377,11 @@ function makePlayer({ id, name, isBot }) {
     score: 0,
     roundDelta: 0,
     hand: [],
+    handTileIds: [],
     discards: [],
     melds: [],
     drawnTile: null,
+    drawnTileId: null,
     lastDrawnTile: null,
     route: null,
     stackWindowMeldId: null,
@@ -440,9 +466,11 @@ function startGame(room) {
   room.pendingClaim = null;
   for (const seat of room.seats) {
     seat.hand = [];
+    seat.handTileIds = [];
     seat.discards = [];
     seat.melds = [];
     seat.drawnTile = null;
+    seat.drawnTileId = null;
     seat.lastDrawnTile = null;
     seat.route = null;
     seat.stackWindowMeldId = null;
@@ -451,7 +479,11 @@ function startGame(room) {
   }
 
   for (let round = 0; round < 13; round += 1) {
-    for (const seat of room.seats) seat.hand.push(room.wall.pop());
+    for (const seat of room.seats) {
+      const instance = room.wall.pop();
+      seat.hand.push(instance.tile);
+      seat.handTileIds.push(instance.tileId);
+    }
   }
   addLog(room, "牌局开始，东风位先摸牌。");
   drawForCurrent(room);
@@ -460,8 +492,8 @@ function startGame(room) {
 function drawForCurrent(room) {
   if (room.winner) return;
   const player = room.seats[room.currentSeat];
-  const tile = room.wall.pop();
-  if (!tile) {
+  const instance = room.wall.pop();
+  if (!instance) {
     room.phase = "ended";
     room.winner = { type: "draw", text: "荒庄，牌墙摸完了。" };
     room.roundResult = { text: "荒庄，本局不结算。", deltas: [0, 0, 0, 0], items: [] };
@@ -469,12 +501,13 @@ function drawForCurrent(room) {
     broadcastRoom(room);
     return;
   }
-  player.hand.push(tile);
-  player.drawnTile = tile;
-  player.lastDrawnTile = tile;
+  player.hand.push(instance.tile);
+  player.handTileIds.push(instance.tileId);
+  player.drawnTile = instance.tile;
+  player.drawnTileId = instance.tileId;
+  player.lastDrawnTile = instance.tile;
   player.stackWindowMeldId = null;
   room.phase = "discard";
-  room.lastDiscard = null;
   addLog(room, `${player.name} 摸牌。`);
 
   if (player.isBot) makeBotDeclarations(room, room.currentSeat);
@@ -506,18 +539,21 @@ function declareCompletedDrill(room, seat, key, silent = false) {
   const option = drillCompletionOptions(player).find((entry) => entry.key === key);
   if (!option) return false;
   const tiles = sortedHand([...option.pattern, option.waitingTile]);
-  removeTiles(player.hand, tiles);
+  const removed = removeHandTiles(player, tiles);
+  if (!removed) return false;
   player.route = "drill";
   player.melds.push({
     id: makeId(8),
     type: "drill",
     kind: option.kind,
     tiles,
+    tileIds: removed.map((entry) => entry.tileId),
     centerTile: tiles[1],
     stacked: true,
     fromSeat: seat
   });
   player.drawnTile = null;
+  player.drawnTileId = null;
   addLog(room, `${player.name} 明示钻了，将刚摸成的${tiles.map(tileName).join("、")}摞起。`);
   if (!silent) broadcastRoom(room);
   return true;
@@ -537,11 +573,13 @@ function declarePungStack(room, seat, key, silent = false) {
     player.stackWindowMeldId = null;
   } else {
     const tile = key.slice("concealed:".length);
-    if (!removeTiles(player.hand, [tile, tile, tile])) return false;
+    const removed = removeHandTiles(player, [tile, tile, tile]);
+    if (!removed) return false;
     player.melds.push({
       id: makeId(8),
       type: "concealed-pong",
       tiles: [tile, tile, tile],
+      tileIds: removed.map((entry) => entry.tileId),
       centerTile: tile,
       stacked: true,
       fromSeat: seat
@@ -553,21 +591,25 @@ function declarePungStack(room, seat, key, silent = false) {
   return true;
 }
 
-function discardTile(room, seatIndex, tile) {
+function discardTile(room, seatIndex, tileId, fallbackTile = "") {
   if (room.winner || room.phase !== "discard" || room.currentSeat !== seatIndex) return false;
   const player = room.seats[seatIndex];
-  const index = player.hand.indexOf(tile);
+  const index = tileId
+    ? player.handTileIds.indexOf(tileId)
+    : player.hand.indexOf(fallbackTile);
   if (index === -1) return false;
 
   const [discarded] = player.hand.splice(index, 1);
+  const [discardedTileId] = player.handTileIds.splice(index, 1);
   player.drawnTile = null;
+  player.drawnTileId = null;
   player.lastDrawnTile = null;
   if (player.stackWindowMeldId && !player.route) player.pungRouteClosed = true;
   player.stackWindowMeldId = null;
-  player.discards.push(discarded);
-  room.lastDiscard = { tile: discarded, fromSeat: seatIndex };
+  player.discards.push({ tile: discarded, tileId: discardedTileId });
+  room.lastDiscard = { tile: discarded, tileId: discardedTileId, fromSeat: seatIndex };
   addLog(room, `${player.name} 打出${tileName(discarded)}。`);
-  offerRonClaims(room, seatIndex, discarded);
+  offerRonClaims(room, seatIndex, discarded, discardedTileId);
   return true;
 }
 
@@ -575,7 +617,7 @@ function sortedResponders(fromSeat, responders) {
   return [...responders].sort((a, b) => ((a - fromSeat + 4) % 4) - ((b - fromSeat + 4) % 4));
 }
 
-function offerRonClaims(room, fromSeat, tile) {
+function offerRonClaims(room, fromSeat, tile, tileId) {
   const responders = [];
   for (let seat = 0; seat < 4; seat += 1) {
     if (seat === fromSeat) continue;
@@ -583,15 +625,15 @@ function offerRonClaims(room, fromSeat, tile) {
   }
   if (responders.length) {
     room.phase = "claim";
-    room.pendingClaim = { stage: "ron", tile, fromSeat, responders: sortedResponders(fromSeat, responders), passed: [] };
+    room.pendingClaim = { stage: "ron", tile, tileId, fromSeat, responders: sortedResponders(fromSeat, responders), passed: [] };
     broadcastRoom(room);
     scheduleBotClaim(room);
     return;
   }
-  offerPongClaim(room, fromSeat, tile);
+  offerPongClaim(room, fromSeat, tile, tileId);
 }
 
-function offerPongClaim(room, fromSeat, tile) {
+function offerPongClaim(room, fromSeat, tile, tileId = room.lastDiscard?.tileId) {
   const responders = [];
   for (let seat = 0; seat < 4; seat += 1) {
     if (seat !== fromSeat && countTile(room.seats[seat].hand, tile) >= 2) responders.push(seat);
@@ -599,7 +641,7 @@ function offerPongClaim(room, fromSeat, tile) {
   const nearest = sortedResponders(fromSeat, responders)[0];
   if (nearest !== undefined) {
     room.phase = "claim";
-    room.pendingClaim = { stage: "pong", tile, fromSeat, responders: [nearest], passed: [] };
+    room.pendingClaim = { stage: "pong", tile, tileId, fromSeat, responders: [nearest], passed: [] };
     broadcastRoom(room);
     scheduleBotClaim(room);
     return;
@@ -629,7 +671,7 @@ function passClaim(room, seat) {
     broadcastRoom(room);
     return true;
   }
-  if (claim.stage === "ron") offerPongClaim(room, claim.fromSeat, claim.tile);
+  if (claim.stage === "ron") offerPongClaim(room, claim.fromSeat, claim.tile, claim.tileId);
   else nextTurn(room);
   return true;
 }
@@ -638,14 +680,16 @@ function claimPong(room, seat) {
   const claim = room.pendingClaim;
   if (!claim || claim.stage !== "pong" || !claim.responders.includes(seat)) return false;
   const player = room.seats[seat];
-  if (!removeTiles(player.hand, [claim.tile, claim.tile])) return false;
+  const removed = removeHandTiles(player, [claim.tile, claim.tile]);
+  if (!removed) return false;
   const discarder = room.seats[claim.fromSeat];
-  if (discarder.discards.at(-1) === claim.tile) discarder.discards.pop();
+  if (discarder.discards.at(-1)?.tileId === claim.tileId) discarder.discards.pop();
 
   const meld = {
     id: makeId(8),
     type: "pong",
     tiles: [claim.tile, claim.tile, claim.tile],
+    tileIds: [...removed.map((entry) => entry.tileId), claim.tileId],
     centerTile: claim.tile,
     stacked: player.route === "pung",
     fromSeat: claim.fromSeat
@@ -653,6 +697,7 @@ function claimPong(room, seat) {
   player.melds.push(meld);
   player.stackWindowMeldId = meld.stacked ? null : meld.id;
   player.drawnTile = null;
+  player.drawnTileId = null;
   player.lastDrawnTile = null;
   room.currentSeat = seat;
   room.phase = "discard";
@@ -674,6 +719,7 @@ function claimRon(room, seat) {
   const tile = claim.tile;
   const fromSeat = claim.fromSeat;
   room.seats[seat].hand.push(tile);
+  room.seats[seat].handTileIds.push(claim.tileId);
   endWithWinner(room, seat, "点炮", tile, fromSeat);
   return true;
 }
@@ -691,6 +737,10 @@ function endWithWinner(room, seat, method, winningTile, fromSeat) {
   clearRoomTimer(room);
   room.phase = "ended";
   room.pendingClaim = null;
+  for (const seatPlayer of room.seats) {
+    seatPlayer.drawnTile = null;
+    seatPlayer.drawnTileId = null;
+  }
   room.roundResult = calculateResult(room, seat, method, winningTile, fromSeat);
   room.winner = { seat, name: player.name, method, text: `${player.name} ${method}胡牌！` };
   addLog(room, room.roundResult.text);
@@ -707,7 +757,8 @@ function botDiscard(room) {
     return;
   }
   const tile = chooseBotDiscard(player);
-  discardTile(room, room.currentSeat, tile);
+  const tileIndexInHand = player.hand.indexOf(tile);
+  discardTile(room, room.currentSeat, player.handTileIds[tileIndexInHand]);
 }
 
 function chooseBotDiscard(player) {
@@ -744,6 +795,43 @@ function clearRoomTimer(room) {
   room.timer = null;
 }
 
+function leaveRoom(client) {
+  const room = rooms.get(client.roomId);
+  if (!room || client.seat < 0) return;
+  const seatIndex = client.seat;
+  const player = room.seats[seatIndex];
+  client.roomId = null;
+  client.seat = -1;
+
+  if (room.phase === "waiting") {
+    room.seats[seatIndex] = null;
+  } else if (player) {
+    player.id = `bot-${room.id}-${seatIndex}-${makeId(4)}`;
+    player.name = `${player.name}（托管）`;
+    player.isBot = true;
+    player.connected = true;
+  }
+
+  const humans = room.seats.filter((seat) => seat && !seat.isBot);
+  if (!humans.length) {
+    clearRoomTimer(room);
+    rooms.delete(room.id);
+  } else {
+    if (room.hostId === player?.id || !humans.some((seat) => seat.id === room.hostId)) {
+      room.hostId = humans[0].id;
+    }
+    addLog(room, `${player?.name || "玩家"} 退出了房间。`);
+    broadcastRoom(room);
+    if (room.phase === "discard" && room.currentSeat === seatIndex && room.seats[seatIndex]?.isBot) {
+      clearRoomTimer(room);
+      room.timer = setTimeout(() => botDiscard(room), 360);
+    } else if (room.phase === "claim" && room.pendingClaim?.responders.includes(seatIndex)) {
+      scheduleBotClaim(room);
+    }
+  }
+  sendJson(client.socket, { type: "left" });
+}
+
 function routeLabel(player) {
   if (player.route === "drill") return "钻了";
   if (player.route === "pung") return "上摞";
@@ -756,7 +844,7 @@ function roomSnapshot(room, viewerSeat) {
   const isResponder = Boolean(claim && claim.responders.includes(viewerSeat) && !claim.passed.includes(viewerSeat));
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   return {
-    version: "1.6",
+    version: "1.7",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat && seat.id === room.hostId),
@@ -766,6 +854,8 @@ function roomSnapshot(room, viewerSeat) {
     currentSeat: room.currentSeat,
     wallCount: room.wall.length,
     lastDiscard: room.lastDiscard,
+    latestDiscardTileId: room.lastDiscard?.tileId || null,
+    drawnTileId: viewer?.drawnTileId || null,
     winner: room.winner,
     roundResult: room.roundResult,
     canRon: isResponder && claim.stage === "ron",
@@ -788,7 +878,7 @@ function roomSnapshot(room, viewerSeat) {
       melds: seat.melds,
       route: seat.route,
       routeLabel: routeLabel(seat),
-      hand: index === viewerSeat || room.winner ? sortedHand(seat.hand) : null
+      hand: index === viewerSeat || room.winner ? sortedPhysicalHand(seat) : null
     } : null),
     log: room.log
   };
@@ -861,6 +951,11 @@ function handleMessage(client, message) {
       return;
     }
 
+    if (data.type === "leave") {
+      leaveRoom(client);
+      return;
+    }
+
     const room = rooms.get(client.roomId);
     if (!room) return;
     if (data.type === "addBots" && client.id === room.hostId && room.phase === "waiting") {
@@ -869,7 +964,7 @@ function handleMessage(client, message) {
     } else if (data.type === "start" && client.id === room.hostId && room.phase === "waiting") {
       startGame(room);
     } else if (data.type === "discard") {
-      discardTile(room, client.seat, String(data.tile || ""));
+      discardTile(room, client.seat, String(data.tileId || ""), String(data.tile || ""));
     } else if (data.type === "declareDrill") {
       declareCompletedDrill(room, client.seat, String(data.key || ""));
     } else if (data.type === "declarePung") {
@@ -974,6 +1069,7 @@ if (require.main === module) {
 
 module.exports = {
   tileTypes,
+  makeDeck,
   standardShape,
   isSevenPairs,
   isLuxurySevenPairs,

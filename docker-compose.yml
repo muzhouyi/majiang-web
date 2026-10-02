@@ -1,10 +1,10 @@
 services:
   majiang-web:
-    image: dongguang-mahjong:1.6
+    image: dongguang-mahjong:1.7
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: dongguang-mahjong-v16
+    container_name: dongguang-mahjong-v17
     restart: unless-stopped
     init: true
     ports:

@@ -2,6 +2,7 @@ const test = require("node:test");
 const assert = require("node:assert/strict");
 
 const {
+  tileTypes,
   standardShape,
   isSevenPairs,
   isLuxurySevenPairs,
@@ -11,7 +12,8 @@ const {
   hasOneDragon,
   evaluateWin,
   drillCompletionOptions,
-  makePlayer
+  makePlayer,
+  makeDeck
 } = require("../server");
 
 function playerWith(hand, options = {}) {
@@ -30,6 +32,13 @@ function pong(tile, stacked = false) {
 function drill(tiles) {
   return { id: `drill-${tiles.join("")}`, type: "drill", tiles, centerTile: tiles[1], stacked: true };
 }
+
+test("每一张实体牌都有唯一 tileId，同时保留规则使用的牌值", () => {
+  const deck = makeDeck();
+  assert.equal(deck.length, 136);
+  assert.equal(new Set(deck.map((entry) => entry.tileId)).size, 136);
+  assert.ok(deck.every((entry) => tileTypes.includes(entry.tile)));
+});
 
 test("普通胡支持顺子、刻子和一对将", () => {
   const hand = ["m1", "m2", "m3", "m4", "m5", "m6", "p2", "p3", "p4", "s7", "s7", "s7", "E", "E"];

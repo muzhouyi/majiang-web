@@ -1,13 +1,13 @@
-# 青桌麻将 v1.6：1Panel Docker 部署
+# 青桌麻将 v1.7：1Panel Docker 部署
 
 ## 部署包
 
-使用 `majiang-v1.6-1panel.zip`，或直接上传 `deploy/1panel-v1.6` 文件夹。部署包已经包含服务端、网页、34 张 SVG 牌面、Dockerfile 和 Compose 配置。
+使用 `majiang-v1.7-1panel.zip`，或直接上传 `deploy/1panel-v1.7` 文件夹。部署包已经包含服务端、网页、34 张 SVG 牌面、Dockerfile 和 Compose 配置。
 
 ## 一、上传并解压
 
-1. 在 1Panel 的“文件”中创建目录，例如 `/opt/majiang-v1.6`。
-2. 上传 `majiang-v1.6-1panel.zip` 并解压到该目录。
+1. 在 1Panel 的“文件”中创建目录，例如 `/opt/majiang-v1.7`。
+2. 上传 `majiang-v1.7-1panel.zip` 并解压到该目录。
 3. 确认目录中能直接看到 `docker-compose.yml`、`Dockerfile`、`server.js`、`package.json` 和 `public`，不要额外多套一层文件夹。
 
 ## 二、设置端口
@@ -27,8 +27,8 @@ MAJIANG_PORT=3019
 
 1. 打开 1Panel 的“容器 → 编排”。
 2. 选择“创建编排”或“路径选择”。
-3. 选择 `/opt/majiang-v1.6/docker-compose.yml`。
-4. 确认并启动，首次启动会拉取 `node:24-alpine` 并构建本地镜像 `dongguang-mahjong:1.6`。
+3. 选择 `/opt/majiang-v1.7/docker-compose.yml`。
+4. 确认并启动，首次启动会拉取 `node:24-alpine` 并构建本地镜像 `dongguang-mahjong:1.7`。
 5. 容器名称应为 `dongguang-mahjong-v16`，健康状态稍后应显示为正常。
 
 如果拉取 Node 镜像失败，需要先在 1Panel 的容器设置中配置可用的 Docker 镜像加速地址，再重新构建。
