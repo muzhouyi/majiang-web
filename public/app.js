@@ -137,6 +137,14 @@ function renderBackTiles(count) {
 }
 
 function renderMeld(meld) {
+  if (meld.hidden) {
+    const back = '<span class="meld-back tile-back" aria-hidden="true"></span>';
+    return `<div class="meld meld-stacked meld-hidden" aria-label="暗置上摞">
+      <span class="stack-tile stack-left">${back}</span>
+      <span class="stack-tile stack-right">${back}</span>
+      <span class="stack-tile stack-upper">${back}</span>
+    </div>`;
+  }
   const instances = meld.tiles.map((tile, index) => ({ tile, tileId: meld.tileIds?.[index] || `${meld.id}-${index}` }));
   if (!meld.stacked) {
     return `<div class="meld meld-row" aria-label="碰牌 ${tileLabels[meld.tiles[0]]}">${instances.map((entry) => renderTile(entry, { size: "micro" })).join("")}</div>`;
@@ -159,7 +167,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <div class="brand-mark">${renderTile("C")}</div>
-      <div><p class="eyebrow">东光规则 · v1.7</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v1.8</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -236,16 +244,10 @@ function renderGame() {
 
 function renderHand(self) {
   const hand = self.hand || [];
-  const drawn = hand.find((entry) => entry.tileId === drawnTileId) || (hand.length === 14 ? hand.at(-1) : null);
-  const mainTiles = drawn ? hand.filter((entry) => entry.tileId !== drawn.tileId) : hand;
-  const mainSlots = Array.from({ length: 13 }, (_, index) => (
-    `<span class="hand-slot">${mainTiles[index] ? renderTile(mainTiles[index], { clickable: state.canDiscard }) : ""}</span>`
+  const slots = Array.from({ length: 14 }, (_, index) => (
+    `<span class="hand-slot">${hand[index] ? renderTile(hand[index], { clickable: state.canDiscard }) : ""}</span>`
   )).join("");
-  return `<div class="hand-rack" aria-label="自己的手牌">
-    <div class="hand-main-slots">${mainSlots}</div>
-    <span class="draw-gap" aria-hidden="true"></span>
-    <span class="hand-slot draw-slot">${drawn ? renderTile(drawn, { clickable: state.canDiscard }) : ""}</span>
-  </div>`;
+  return `<div class="hand-rack" aria-label="自己的手牌"><div class="hand-main-slots">${slots}</div></div>`;
 }
 
 function renderSelectedPreview(self) {
@@ -269,14 +271,24 @@ function renderDiscardZone(player) {
   const count = Math.max(DISCARD_SLOTS, player.discards.length);
   const slots = Array.from({ length: count }, (_, index) => {
     const entry = player.discards[index];
-    if (!entry) return `<span class="discard-slot" aria-hidden="true"></span>`;
+    const placement = discardPlacement(position, index);
+    if (!entry) return `<span class="discard-slot" style="${placement}" aria-hidden="true"></span>`;
     const latest = entry.tileId === latestDiscardTileId;
-    return `<span class="discard-slot ${latest ? "is-latest" : ""}" data-discard-tile-id="${entry.tileId}">
+    return `<span class="discard-slot ${latest ? "is-latest" : ""}" style="${placement}" data-discard-tile-id="${entry.tileId}">
       <span class="discard-face">${renderTile(entry, { size: "discard" })}</span>
       ${latest ? '<span class="latest-arrow" aria-label="最新弃牌"></span>' : ""}
     </span>`;
   }).join("");
   return `<section class="discard-zone discard-${position}" aria-label="${player.name}的弃牌"><div class="discard-grid">${slots}</div></section>`;
+}
+
+function discardPlacement(position, index) {
+  const group = Math.floor(index / 6);
+  const offset = index % 6;
+  if (position === "top") return `grid-row:${5 - group};grid-column:${6 - offset}`;
+  if (position === "left") return `grid-row:${6 - offset};grid-column:${5 - group}`;
+  if (position === "right") return `grid-row:${offset + 1};grid-column:${group + 1}`;
+  return `grid-row:${group + 1};grid-column:${offset + 1}`;
 }
 
 function renderActions() {

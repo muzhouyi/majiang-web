@@ -15,7 +15,7 @@ test("手机布局状态只通过共享根容器类切换", () => {
 
 test("手牌与四家弃牌使用固定槽位", () => {
   assert.match(appSource, /DISCARD_SLOTS = 30/);
-  assert.match(appSource, /length: 13/);
+  assert.match(appSource, /length: 14/);
   assert.match(cssSource, /grid-template-columns: repeat\(6, var\(--discard-tile-width\)\)/);
   assert.match(cssSource, /flex-shrink: 0/);
   assert.doesNotMatch(cssSource, /margin:\s*-\d/);

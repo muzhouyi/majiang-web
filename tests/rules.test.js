@@ -13,7 +13,9 @@ const {
   evaluateWin,
   drillCompletionOptions,
   makePlayer,
-  makeDeck
+  makeDeck,
+  sortedPhysicalHand,
+  snapshotMeld
 } = require("../server");
 
 function playerWith(hand, options = {}) {
@@ -38,6 +40,24 @@ test("每一张实体牌都有唯一 tileId，同时保留规则使用的牌值"
   assert.equal(deck.length, 136);
   assert.equal(new Set(deck.map((entry) => entry.tileId)).size, 136);
   assert.ok(deck.every((entry) => tileTypes.includes(entry.tile)));
+});
+
+test("摸到的牌按牌值进入手牌顺序，同时由 tileId 保留摸牌标记", () => {
+  const player = makePlayer({ id: "sort", name: "排序测试", isBot: false });
+  player.hand = ["m9", "m1", "p3"];
+  player.handTileIds = ["nine", "drawn-one", "pin-three"];
+  player.drawnTileId = "drawn-one";
+  assert.deepEqual(sortedPhysicalHand(player).map((entry) => entry.tileId), ["drawn-one", "nine", "pin-three"]);
+});
+
+test("钻牌和自摸上摞对其他玩家隐藏，碰来的上摞保持亮牌", () => {
+  const drillMeld = drill(["m1", "m2", "m3"]);
+  const concealed = { id: "concealed", type: "concealed-pong", tiles: ["p5", "p5", "p5"], tileIds: ["a", "b", "c"], centerTile: "p5", stacked: true };
+  const exposed = pong("s7", true);
+  assert.deepEqual(snapshotMeld(drillMeld, false).tiles, [null, null, null]);
+  assert.deepEqual(snapshotMeld(concealed, false).tiles, [null, null, null]);
+  assert.deepEqual(snapshotMeld(exposed, false).tiles, ["s7", "s7", "s7"]);
+  assert.deepEqual(snapshotMeld(drillMeld, true).tiles, ["m1", "m2", "m3"]);
 });
 
 test("普通胡支持顺子、刻子和一对将", () => {

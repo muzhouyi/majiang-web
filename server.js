@@ -106,11 +106,19 @@ function removeHandTiles(player, tiles) {
 function sortedPhysicalHand(player) {
   return player.hand
     .map((tile, index) => ({ tile, tileId: player.handTileIds[index] }))
-    .sort((a, b) => {
-      if (a.tileId === player.drawnTileId) return 1;
-      if (b.tileId === player.drawnTileId) return -1;
-      return tileIndex.get(a.tile) - tileIndex.get(b.tile);
-    });
+    .sort((a, b) => tileIndex.get(a.tile) - tileIndex.get(b.tile));
+}
+
+function snapshotMeld(meld, isOwner) {
+  const concealed = meld.type === "drill" || meld.type === "concealed-pong";
+  if (isOwner || !concealed) return { ...meld, hidden: false };
+  return {
+    ...meld,
+    tiles: [null, null, null],
+    tileIds: [null, null, null],
+    centerTile: null,
+    hidden: true
+  };
 }
 
 function tileName(tile) {
@@ -554,7 +562,7 @@ function declareCompletedDrill(room, seat, key, silent = false) {
   });
   player.drawnTile = null;
   player.drawnTileId = null;
-  addLog(room, `${player.name} 明示钻了，将刚摸成的${tiles.map(tileName).join("、")}摞起。`);
+  addLog(room, `${player.name} 明示钻了，将刚摸成的钻/边牌暗置上摞。`);
   if (!silent) broadcastRoom(room);
   return true;
 }
@@ -844,7 +852,7 @@ function roomSnapshot(room, viewerSeat) {
   const isResponder = Boolean(claim && claim.responders.includes(viewerSeat) && !claim.passed.includes(viewerSeat));
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   return {
-    version: "1.7",
+    version: "1.8",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat && seat.id === room.hostId),
@@ -875,7 +883,7 @@ function roomSnapshot(room, viewerSeat) {
       roundDelta: seat.roundDelta,
       handCount: seat.hand.length,
       discards: seat.discards,
-      melds: seat.melds,
+      melds: seat.melds.map((meld) => snapshotMeld(meld, index === viewerSeat)),
       route: seat.route,
       routeLabel: routeLabel(seat),
       hand: index === viewerSeat || room.winner ? sortedPhysicalHand(seat) : null
@@ -1070,6 +1078,8 @@ if (require.main === module) {
 module.exports = {
   tileTypes,
   makeDeck,
+  sortedPhysicalHand,
+  snapshotMeld,
   standardShape,
   isSevenPairs,
   isLuxurySevenPairs,
