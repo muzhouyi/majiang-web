@@ -27,3 +27,10 @@ test("最新弃牌、摸牌和选牌均按 tileId 追踪", () => {
   assert.match(appSource, /selectedTileId/);
   assert.match(appSource, /data-discard-tile-id/);
 });
+
+test("弃牌使用透明外壳并从每行中央向两侧固定填充", () => {
+  assert.match(appSource, /centeredSlot = \[3, 4, 2, 5, 1, 6\]/);
+  assert.match(cssSource, /\.tile-discard\s*\{/);
+  assert.match(cssSource, /border: 0; border-radius: 0; background: transparent; box-shadow: none/);
+  assert.doesNotMatch(appSource, /discard-tiles/);
+});

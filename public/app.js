@@ -167,7 +167,7 @@ function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <div class="brand-mark">${renderTile("C")}</div>
-      <div><p class="eyebrow">东光规则 · v1.8</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v1.9</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -285,10 +285,11 @@ function renderDiscardZone(player) {
 function discardPlacement(position, index) {
   const group = Math.floor(index / 6);
   const offset = index % 6;
-  if (position === "top") return `grid-row:${5 - group};grid-column:${6 - offset}`;
-  if (position === "left") return `grid-row:${6 - offset};grid-column:${5 - group}`;
-  if (position === "right") return `grid-row:${offset + 1};grid-column:${group + 1}`;
-  return `grid-row:${group + 1};grid-column:${offset + 1}`;
+  const centeredSlot = [3, 4, 2, 5, 1, 6][offset];
+  if (position === "top") return `grid-row:${5 - group};grid-column:${centeredSlot}`;
+  if (position === "left") return `grid-row:${centeredSlot};grid-column:${5 - group}`;
+  if (position === "right") return `grid-row:${centeredSlot};grid-column:${group + 1}`;
+  return `grid-row:${group + 1};grid-column:${centeredSlot}`;
 }
 
 function renderActions() {

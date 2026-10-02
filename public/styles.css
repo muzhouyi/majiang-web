@@ -237,7 +237,13 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
   transform-origin: center bottom;
 }
 .tile-face { display: block; width: 100%; height: 100%; object-fit: contain; pointer-events: none; user-select: none; }
-.tile-discard { width: var(--discard-tile-width); height: var(--discard-tile-height); border-radius: 2px; box-shadow: inset 0 -1px 0 #d4cdbb, 0 1px 2px rgba(0,0,0,.3); }
+.tile-discard {
+  width: var(--discard-tile-width); height: var(--discard-tile-height); overflow: visible;
+  border: 0; border-radius: 0; background: transparent; box-shadow: none;
+}
+.tile-discard .tile-face {
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.25));
+}
 .discard-left .tile-discard, .discard-right .tile-discard { width: var(--discard-tile-width); height: var(--discard-tile-height); }
 .tile-micro { width: 22px; height: 31px; border-radius: 3px; }
 .tile-clickable { flex-shrink: 0; touch-action: manipulation; transition: transform 120ms ease, box-shadow 120ms ease; }
