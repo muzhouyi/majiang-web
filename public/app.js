@@ -149,7 +149,7 @@ function renderLobby() {
       <div class="lobby-brand">
         <div class="brand-mark">${renderTile("C")}</div>
         <div>
-          <p class="eyebrow">东光规则 · v1.5</p>
+          <p class="eyebrow">东光规则 · v1.6</p>
           <h1>青桌麻将</h1>
           <p class="lede">摸牌有声，落牌有数。坐下开一桌。</p>
         </div>
@@ -237,13 +237,7 @@ function renderGame() {
 }
 
 function renderHand(self) {
-  const locked = new Map();
-  for (const tile of self.activeDrillWait?.pattern || []) locked.set(tile, (locked.get(tile) || 0) + 1);
-  return (self.hand || []).map((tile) => {
-    const isLocked = (locked.get(tile) || 0) > 0;
-    if (isLocked) locked.set(tile, locked.get(tile) - 1);
-    return renderTile(tile, { clickable: state.canDiscard, locked: isLocked });
-  }).join("");
+  return (self.hand || []).map((tile) => renderTile(tile, { clickable: state.canDiscard })).join("");
 }
 
 function renderActions() {
@@ -259,9 +253,8 @@ function renderActions() {
   if (state.canRon) buttons.push(`<button class="win" type="button" data-action="ron">胡</button>`);
   if (state.canPong) buttons.push(`<button class="call" type="button" data-action="pong">碰</button>`);
   if (state.canPass) buttons.push(`<button type="button" data-action="pass">过</button>`);
-  if (state.canCompleteDrill) buttons.push(`<button class="declare" type="button" data-action="completeDrill">钻了并上摞</button>`);
   for (const option of state.drillOptions || []) {
-    buttons.push(`<button class="declare" type="button" data-declare-drill="${escapeHtml(option.key)}">钻了 · 等${escapeHtml(tileLabels[option.waitingTile])}（${option.kind === "edge" ? "边" : "钻"}）</button>`);
+    buttons.push(`<button class="declare" type="button" data-declare-drill="${escapeHtml(option.key)}">钻了 · ${option.kind === "edge" ? "边" : "钻"}${escapeHtml(tileLabels[option.waitingTile])}</button>`);
   }
   for (const option of state.stackOptions || []) {
     buttons.push(`<button class="declare" type="button" data-declare-pung="${escapeHtml(option.key)}">${escapeHtml(option.label)}</button>`);
@@ -315,15 +308,12 @@ function renderSeat(player) {
   const active = state.currentSeat === player.seat && !state.winner;
   const isSelf = player.seat === state.viewerSeat;
   const route = player.routeLabel ? `<span class="route-badge route-${player.route}">${player.routeLabel}</span>` : "";
-  const wait = player.activeDrillWait && isSelf && player.activeDrillWait.waitingTile
-    ? `<span class="wait-badge">等${tileLabels[player.activeDrillWait.waitingTile]}</span>`
-    : "";
   return `
     <section class="seat seat-${position} ${active ? "seat-active" : ""} ${isSelf ? "seat-self" : ""}">
       <div class="seat-head">
         <span class="wind">${player.wind}</span>
         <strong>${escapeHtml(player.name)}</strong>
-        ${route}${wait}
+        ${route}
         <em>${player.score}</em>
       </div>
       ${renderMelds(player.melds)}
@@ -385,8 +375,7 @@ function bindGameEvents() {
         selfWin: { type: "selfWin" },
         ron: { type: "ron" },
         pong: { type: "pong" },
-        pass: { type: "pass" },
-        completeDrill: { type: "completeDrill" }
+        pass: { type: "pass" }
       };
       if (messages[action]) send(messages[action]);
     });

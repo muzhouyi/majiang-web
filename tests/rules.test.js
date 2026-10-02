@@ -10,8 +10,7 @@ const {
   isPureOneSuit,
   hasOneDragon,
   evaluateWin,
-  drillWaitOptions,
-  canCompleteDrill,
+  drillCompletionOptions,
   makePlayer
 } = require("../server");
 
@@ -21,7 +20,6 @@ function playerWith(hand, options = {}) {
   player.melds = options.melds || [];
   player.route = options.route || null;
   player.drawnTile = options.drawnTile || null;
-  player.activeDrillWait = options.activeDrillWait || null;
   return player;
 }
 
@@ -116,15 +114,16 @@ test("钻了后必须有三组已摞钻/边牌才能胡", () => {
   assert.equal(evaluateWin(player, longerHand).valid, false);
 });
 
-test("钻牌搭子必须由开局后的本次摸牌形成", () => {
-  const madeNow = playerWith(["m1", "m3", "p5", "p5"], { drawnTile: "m3" });
-  assert.ok(drillWaitOptions(madeNow).some((option) => option.waitingTile === "m2"));
+test("只有自摸第三张组成完整边或钻顺子后才能明示", () => {
+  const completedEdge = playerWith(["m1", "m2", "m3", "p5"], { drawnTile: "m3" });
+  assert.ok(drillCompletionOptions(completedEdge).some((option) => option.kind === "edge" && option.waitingTile === "m3"));
 
-  const existedBefore = playerWith(["m1", "m1", "m3", "p5"], { drawnTile: "m1" });
-  assert.equal(drillWaitOptions(existedBefore).some((option) => option.waitingTile === "m2"), false);
+  const completedDrill = playerWith(["m1", "m3", "m2", "p5"], { drawnTile: "m2" });
+  assert.ok(drillCompletionOptions(completedDrill).some((option) => option.kind === "drill" && option.waitingTile === "m2"));
 
-  madeNow.activeDrillWait = { kind: "drill", pattern: ["m1", "m3"], waitingTile: "m2" };
-  madeNow.hand.push("m2");
-  madeNow.drawnTile = "m2";
-  assert.equal(canCompleteDrill(madeNow), true);
+  const onlyMadePair = playerWith(["m1", "m3", "p5", "p5"], { drawnTile: "m3" });
+  assert.equal(drillCompletionOptions(onlyMadePair).length, 0);
+
+  const openingSequence = playerWith(["m1", "m2", "m3", "p5"]);
+  assert.equal(drillCompletionOptions(openingSequence).length, 0);
 });

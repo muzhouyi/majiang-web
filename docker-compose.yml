@@ -1,9 +1,25 @@
 services:
   majiang-web:
-    build: .
-    container_name: majiang-web
+    image: dongguang-mahjong:1.6
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dongguang-mahjong-v16
     restart: unless-stopped
+    init: true
     ports:
-      - "3000:3000"
+      - "${BIND_ADDRESS:-127.0.0.1}:${MAJIANG_PORT:-3019}:3019"
     environment:
-      - PORT=3000
+      NODE_ENV: production
+      PORT: "3019"
+      TZ: Asia/Shanghai
+    security_opt:
+      - no-new-privileges:true
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,size=16m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -3,7 +3,7 @@ const crypto = require("crypto");
 const fs = require("fs");
 const path = require("path");
 
-const PORT = Number(process.env.PORT || 3000);
+const PORT = Number(process.env.PORT || 3019);
 const PUBLIC_DIR = path.join(__dirname, "public");
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 
@@ -253,34 +253,27 @@ function makeDrillOption(kind, pattern, waitingTile) {
   return option;
 }
 
-function drillWaitOptions(player) {
+function drillCompletionOptions(player) {
   const drawnTile = player?.drawnTile;
-  if (!drawnTile || player.route === "pung" || player.activeDrillWait) return [];
+  if (!drawnTile || player.route === "pung") return [];
   if (!["m", "p", "s"].includes(drawnTile[0])) return [];
 
   const suit = drawnTile[0];
+  const handBeforeDraw = [...player.hand];
+  handBeforeDraw.splice(handBeforeDraw.lastIndexOf(drawnTile), 1);
   const options = [];
-  const addWhenDrawMadePair = (kind, pattern, waitingTile) => {
-    const handBeforeDraw = [...player.hand];
-    handBeforeDraw.splice(handBeforeDraw.lastIndexOf(drawnTile), 1);
-    if (pattern.includes(drawnTile) && hasTiles(player.hand, pattern) && !hasTiles(handBeforeDraw, pattern)) {
+  const addWhenDrawCompletesSequence = (kind, pattern, waitingTile) => {
+    if (drawnTile === waitingTile && hasTiles(handBeforeDraw, pattern)) {
       options.push(makeDrillOption(kind, pattern, waitingTile));
     }
   };
 
-  addWhenDrawMadePair("edge", [`${suit}1`, `${suit}2`], `${suit}3`);
-  addWhenDrawMadePair("edge", [`${suit}8`, `${suit}9`], `${suit}7`);
+  addWhenDrawCompletesSequence("edge", [`${suit}1`, `${suit}2`], `${suit}3`);
+  addWhenDrawCompletesSequence("edge", [`${suit}8`, `${suit}9`], `${suit}7`);
   for (let number = 1; number <= 7; number += 1) {
-    addWhenDrawMadePair("drill", [`${suit}${number}`, `${suit}${number + 2}`], `${suit}${number + 1}`);
+    addWhenDrawCompletesSequence("drill", [`${suit}${number}`, `${suit}${number + 2}`], `${suit}${number + 1}`);
   }
   return options;
-}
-
-function canCompleteDrill(player) {
-  const wait = player?.activeDrillWait;
-  return Boolean(wait
-    && player.drawnTile === wait.waitingTile
-    && hasTiles(player.hand, [...wait.pattern, wait.waitingTile]));
 }
 
 function stackOptions(player) {
@@ -365,7 +358,6 @@ function makePlayer({ id, name, isBot }) {
     drawnTile: null,
     lastDrawnTile: null,
     route: null,
-    activeDrillWait: null,
     stackWindowMeldId: null,
     pungRouteClosed: false,
     ready: true
@@ -453,7 +445,6 @@ function startGame(room) {
     seat.drawnTile = null;
     seat.lastDrawnTile = null;
     seat.route = null;
-    seat.activeDrillWait = null;
     seat.stackWindowMeldId = null;
     seat.pungRouteClosed = false;
     seat.roundDelta = 0;
@@ -498,11 +489,9 @@ function drawForCurrent(room) {
 
 function makeBotDeclarations(room, seat) {
   const player = room.seats[seat];
-  if (canCompleteDrill(player)) completeDrill(room, seat, true);
-
-  const drillOptions = drillWaitOptions(player);
+  const drillOptions = drillCompletionOptions(player);
   if (drillOptions.length && (player.route === "drill" || (!player.route && Math.random() < 0.28))) {
-    declareDrillWait(room, seat, drillOptions[0].key, true);
+    declareCompletedDrill(room, seat, drillOptions[0].key, true);
   }
 
   const concealedStack = stackOptions(player).find((option) => option.key.startsWith("concealed:"));
@@ -511,37 +500,25 @@ function makeBotDeclarations(room, seat) {
   }
 }
 
-function declareDrillWait(room, seat, key, silent = false) {
+function declareCompletedDrill(room, seat, key, silent = false) {
   if (room.winner || room.phase !== "discard" || room.currentSeat !== seat) return false;
   const player = room.seats[seat];
-  const option = drillWaitOptions(player).find((entry) => entry.key === key);
+  const option = drillCompletionOptions(player).find((entry) => entry.key === key);
   if (!option) return false;
-  player.route = "drill";
-  player.activeDrillWait = option;
-  addLog(room, `${player.name} 明示钻了，${option.label}。`);
-  if (!silent) broadcastRoom(room);
-  return true;
-}
-
-function completeDrill(room, seat, silent = false) {
-  if (room.winner || room.phase !== "discard" || room.currentSeat !== seat) return false;
-  const player = room.seats[seat];
-  if (!canCompleteDrill(player)) return false;
-  const wait = player.activeDrillWait;
-  const tiles = sortedHand([...wait.pattern, wait.waitingTile]);
+  const tiles = sortedHand([...option.pattern, option.waitingTile]);
   removeTiles(player.hand, tiles);
+  player.route = "drill";
   player.melds.push({
     id: makeId(8),
     type: "drill",
-    kind: wait.kind,
+    kind: option.kind,
     tiles,
     centerTile: tiles[1],
     stacked: true,
     fromSeat: seat
   });
   player.drawnTile = null;
-  player.activeDrillWait = null;
-  addLog(room, `${player.name} 再次明示钻了，将${tiles.map(tileName).join("、")}摞起。`);
+  addLog(room, `${player.name} 明示钻了，将刚摸成的${tiles.map(tileName).join("、")}摞起。`);
   if (!silent) broadcastRoom(room);
   return true;
 }
@@ -581,14 +558,6 @@ function discardTile(room, seatIndex, tile) {
   const player = room.seats[seatIndex];
   const index = player.hand.indexOf(tile);
   if (index === -1) return false;
-
-  if (player.activeDrillWait) {
-    const remaining = [...player.hand];
-    remaining.splice(index, 1);
-    if (!hasTiles(remaining, player.activeDrillWait.pattern)) {
-      throw new Error("这张牌属于已明示的钻牌搭子，不能打出。");
-    }
-  }
 
   const [discarded] = player.hand.splice(index, 1);
   player.drawnTile = null;
@@ -733,7 +702,6 @@ function botDiscard(room) {
   if (room.winner || room.phase !== "discard") return;
   const player = room.seats[room.currentSeat];
   if (!player || !player.isBot) return;
-  if (canCompleteDrill(player)) completeDrill(room, room.currentSeat, true);
   if (evaluateWin(player, player.hand).valid) {
     endWithWinner(room, room.currentSeat, "自摸", player.lastDrawnTile, null);
     return;
@@ -743,13 +711,7 @@ function botDiscard(room) {
 }
 
 function chooseBotDiscard(player) {
-  const locked = player.activeDrillWait?.pattern || [];
-  const candidates = sortedHand(player.hand).filter((tile, index, hand) => {
-    if (!locked.includes(tile)) return true;
-    const remaining = [...hand];
-    remaining.splice(index, 1);
-    return hasTiles(remaining, locked);
-  });
+  const candidates = sortedHand(player.hand);
   const counts = new Map();
   for (const tile of candidates) counts.set(tile, (counts.get(tile) || 0) + 1);
   const scored = candidates.map((tile) => {
@@ -794,7 +756,7 @@ function roomSnapshot(room, viewerSeat) {
   const isResponder = Boolean(claim && claim.responders.includes(viewerSeat) && !claim.passed.includes(viewerSeat));
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   return {
-    version: "1.5",
+    version: "1.6",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat && seat.id === room.hostId),
@@ -811,8 +773,7 @@ function roomSnapshot(room, viewerSeat) {
     canPass: isResponder,
     canDiscard: viewerTurn,
     canSelfWin: viewerTurn && evaluateWin(viewer, viewer?.hand || []).valid,
-    canCompleteDrill: viewerTurn && canCompleteDrill(viewer),
-    drillOptions: viewerTurn ? drillWaitOptions(viewer) : [],
+    drillOptions: viewerTurn ? drillCompletionOptions(viewer) : [],
     stackOptions: !room.winner && room.phase !== "waiting" ? stackOptions(viewer) : [],
     players: room.seats.map((seat, index) => seat ? {
       seat: index,
@@ -827,9 +788,6 @@ function roomSnapshot(room, viewerSeat) {
       melds: seat.melds,
       route: seat.route,
       routeLabel: routeLabel(seat),
-      activeDrillWait: seat.activeDrillWait
-        ? (index === viewerSeat ? seat.activeDrillWait : { declared: true })
-        : null,
       hand: index === viewerSeat || room.winner ? sortedHand(seat.hand) : null
     } : null),
     log: room.log
@@ -913,9 +871,7 @@ function handleMessage(client, message) {
     } else if (data.type === "discard") {
       discardTile(room, client.seat, String(data.tile || ""));
     } else if (data.type === "declareDrill") {
-      declareDrillWait(room, client.seat, String(data.key || ""));
-    } else if (data.type === "completeDrill") {
-      completeDrill(room, client.seat);
+      declareCompletedDrill(room, client.seat, String(data.key || ""));
     } else if (data.type === "declarePung") {
       declarePungStack(room, client.seat, String(data.key || ""));
     } else if (data.type === "selfWin" && room.currentSeat === client.seat) {
@@ -1026,7 +982,6 @@ module.exports = {
   isPureOneSuit,
   hasOneDragon,
   evaluateWin,
-  drillWaitOptions,
-  canCompleteDrill,
+  drillCompletionOptions,
   makePlayer
 };

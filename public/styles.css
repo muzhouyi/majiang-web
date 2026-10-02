@@ -926,15 +926,6 @@ button.tile {
   outline-offset: 0;
 }
 
-.tile-locked::after {
-  position: absolute;
-  inset: 2px;
-  border: 2px solid var(--jade);
-  border-radius: 4px;
-  content: "";
-  pointer-events: none;
-}
-
 .tile-mini {
   width: 28px;
 }
