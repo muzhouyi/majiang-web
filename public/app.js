@@ -5,8 +5,15 @@ const tileLabels = {
   E: "东风", S: "南风", W: "西风", N: "北风", C: "红中", F: "发财", P: "白板"
 };
 
-const wanNumbers = ["", "一", "二", "三", "四", "伍", "六", "七", "八", "九"];
-const honorGlyphs = { E: "東", S: "南", W: "西", N: "北", C: "中", F: "發" };
+const tileAssetMap = {
+  E: "MJf1-.svg",
+  S: "MJf2-.svg",
+  W: "MJf3-.svg",
+  N: "MJf4-.svg",
+  C: "MJd1-.svg",
+  F: "MJd2-.svg",
+  P: "MJd3-.svg"
+};
 
 let socket;
 let state = null;
@@ -62,6 +69,19 @@ function tileKind(tile) {
   return "honor";
 }
 
+function tileAssetPath(tile) {
+  if (!tile) return "";
+  if (tile.startsWith("m")) return `/tiles/MJw${tile[1]}-.svg`;
+  if (tile.startsWith("p")) return `/tiles/MJt${tile[1]}-.svg`;
+  if (tile.startsWith("s")) return `/tiles/MJs${tile[1]}-.svg`;
+  return tileAssetMap[tile] ? `/tiles/${tileAssetMap[tile]}` : "";
+}
+
+function tileImage(tile) {
+  const src = tileAssetPath(tile);
+  return src ? `<img class="tile-face" src="${src}" alt="" aria-hidden="true" draggable="false" />` : "";
+}
+
 function renderTile(tile, options = {}) {
   const tag = options.clickable ? "button" : "span";
   const attrs = options.clickable
@@ -69,7 +89,7 @@ function renderTile(tile, options = {}) {
     : `role="img" aria-label="${tileLabels[tile] || tile}"`;
   return `
     <${tag} class="tile tile-${tileKind(tile)} ${options.mini ? "tile-mini" : ""} ${options.clickable ? "tile-clickable" : ""}" ${attrs}>
-      ${tileSvg(tile)}
+      ${tileImage(tile)}
     </${tag}>
   `;
 }
@@ -81,114 +101,6 @@ function renderBackTiles(count) {
 function renderDiscards(discards) {
   if (!discards.length) return `<span class="empty-discard">未出牌</span>`;
   return discards.map((tile) => renderTile(tile, { mini: true })).join("");
-}
-
-function pipLayout(number) {
-  return {
-    1: [[32, 52, "center"]],
-    2: [[32, 34, "black"], [32, 70, "black"]],
-    3: [[22, 30, "black"], [32, 52, "red"], [42, 74, "black"]],
-    4: [[22, 32, "black"], [42, 32, "black"], [22, 72, "black"], [42, 72, "black"]],
-    5: [[22, 30, "black"], [42, 30, "black"], [32, 52, "red"], [22, 74, "black"], [42, 74, "black"]],
-    6: [[22, 28, "black"], [42, 28, "black"], [22, 52, "black"], [42, 52, "black"], [22, 76, "red"], [42, 76, "red"]],
-    7: [[22, 24, "black"], [42, 24, "black"], [32, 42, "red"], [22, 58, "black"], [42, 58, "black"], [22, 80, "black"], [42, 80, "black"]],
-    8: [[22, 24, "black"], [42, 24, "black"], [22, 42, "black"], [42, 42, "black"], [22, 62, "black"], [42, 62, "black"], [22, 80, "black"], [42, 80, "black"]],
-    9: [[20, 24, "black"], [32, 24, "black"], [44, 24, "black"], [20, 52, "black"], [32, 52, "black"], [44, 52, "black"], [20, 80, "red"], [32, 80, "red"], [44, 80, "red"]]
-  }[number] || [];
-}
-
-function bambooLayout(number) {
-  return {
-    2: [[32, 36, "green"], [32, 68, "green"]],
-    3: [[32, 28, "green"], [32, 52, "green"], [32, 76, "green"]],
-    4: [[24, 34, "green"], [40, 34, "green"], [24, 70, "green"], [40, 70, "green"]],
-    5: [[24, 30, "green"], [40, 30, "green"], [32, 52, "red"], [24, 74, "green"], [40, 74, "green"]],
-    6: [[22, 28, "green"], [42, 28, "green"], [22, 52, "green"], [42, 52, "green"], [22, 76, "green"], [42, 76, "green"]],
-    7: [[22, 24, "red"], [42, 24, "red"], [22, 46, "green"], [42, 46, "green"], [22, 68, "green"], [42, 68, "green"], [32, 84, "green"]],
-    8: [[22, 24, "green"], [42, 24, "green"], [22, 42, "green"], [42, 42, "green"], [22, 62, "green"], [42, 62, "green"], [22, 80, "green"], [42, 80, "green"]],
-    9: [[20, 24, "red"], [32, 24, "green"], [44, 24, "red"], [20, 52, "green"], [32, 52, "green"], [44, 52, "green"], [20, 80, "red"], [32, 80, "green"], [44, 80, "red"]]
-  }[number] || [];
-}
-
-function pip(x, y, colorKey) {
-  if (colorKey === "center") {
-    return `
-      <g class="pip">
-        <circle cx="${x}" cy="${y}" r="17" fill="none" stroke="#167052" stroke-width="3.4"/>
-        <circle cx="${x}" cy="${y}" r="12" fill="none" stroke="#bd2c2c" stroke-width="2.5"/>
-        <circle cx="${x}" cy="${y}" r="7" fill="none" stroke="#1b1b1b" stroke-width="2.4"/>
-        <circle cx="${x}" cy="${y}" r="2.7" fill="#1b1b1b"/>
-      </g>
-    `;
-  }
-  const color = colorKey === "red" ? "#bd2c2c" : "#1b1b1b";
-  return `
-    <g class="pip">
-      <circle cx="${x}" cy="${y}" r="6.4" fill="none" stroke="${color}" stroke-width="2"/>
-      <circle cx="${x}" cy="${y}" r="3.8" fill="none" stroke="${color}" stroke-width="1.35"/>
-      <circle cx="${x}" cy="${y}" r="1.5" fill="${color}"/>
-    </g>
-  `;
-}
-
-function bamboo(x, y, colorKey) {
-  const color = colorKey === "red" ? "#bd2c2c" : "#167052";
-  return `
-    <g class="bamboo" stroke="${color}" stroke-width="3.2" stroke-linecap="round" fill="none">
-      <path d="M${x} ${y - 10}v20"/>
-      <path d="M${x - 4.8} ${y - 3.5}h9.6"/>
-      <path d="M${x - 4.8} ${y + 3.5}h9.6"/>
-    </g>
-  `;
-}
-
-function bird() {
-  return `
-    <g class="bird" fill="none" stroke-linecap="round" stroke-linejoin="round">
-      <path d="M20 64c10-3 18-13 20-29 8 7 10 18 4 29-5 9-14 13-25 11" stroke="#1b1b1b" stroke-width="3.2"/>
-      <path d="M26 44c-8 6-10 15-6 25" stroke="#167052" stroke-width="3"/>
-      <path d="M41 31l10-5-5 11" stroke="#bd2c2c" stroke-width="2.6"/>
-      <circle cx="38" cy="31" r="2.2" fill="#1b1b1b" stroke="none"/>
-      <path d="M22 76c-5 4-9 7-12 12M29 77c-4 5-8 9-12 13" stroke="#167052" stroke-width="2.4"/>
-      <path d="M18 62c-6-5-8-11-6-17" stroke="#bd2c2c" stroke-width="2.4"/>
-    </g>
-  `;
-}
-
-function tileFace(inner) {
-  return `
-    <svg class="tile-face" viewBox="0 0 64 104" aria-hidden="true">
-      <rect class="tile-side-fill" x="5" y="8" width="55" height="92" rx="7"/>
-      <rect class="tile-body" x="3" y="3" width="55" height="91" rx="7"/>
-      <rect class="tile-inner" x="8" y="8" width="45" height="80" rx="3"/>
-      ${inner}
-    </svg>
-  `;
-}
-
-function tileSvg(tile) {
-  const kind = tileKind(tile);
-  const number = Number(tile[1]);
-  if (kind === "pin") {
-    return tileFace(pipLayout(number).map(([x, y, color]) => pip(x, y, color)).join(""));
-  }
-  if (kind === "suo") {
-    return tileFace(number === 1 ? bird() : bambooLayout(number).map(([x, y, color]) => bamboo(x, y, color)).join(""));
-  }
-  if (kind === "wan") {
-    return tileFace(`
-      <text class="wan-number" x="32" y="36" text-anchor="middle">${wanNumbers[number]}</text>
-      <text class="wan-mark" x="32" y="77" text-anchor="middle">萬</text>
-    `);
-  }
-  if (tile === "P") {
-    return tileFace(`
-      <rect x="19" y="24" width="26" height="56" rx="1.5" fill="none" stroke="#1b1b1b" stroke-width="4.2"/>
-      <rect x="25" y="34" width="14" height="36" fill="none" stroke="#1b1b1b" stroke-width="1.9"/>
-    `);
-  }
-  const className = tile === "C" ? "honor-red" : tile === "F" ? "honor-green" : "honor-black";
-  return tileFace(`<text class="honor-glyph ${className}" x="32" y="68" text-anchor="middle">${honorGlyphs[tile]}</text>`);
 }
 
 function scoreClass(value) {
@@ -203,9 +115,9 @@ function renderLobby() {
       <div class="brand-panel">
         <div class="brand-mark">${renderTile("C")}</div>
         <div>
-          <p class="eyebrow">东光/沧州规则试做版 · v1.3</p>
+          <p class="eyebrow">东光/沧州规则试做版 · v1.4</p>
           <h1>青桌麻将</h1>
-          <p class="lede">牌面改为 SVG 矢量图：筒子、条子、万子和字牌都由固定牌面坐标表生成，不使用截图或 PNG 素材。</p>
+          <p class="lede">牌面改为本地 SVG 矢量素材：筒子、条子、万子和字牌都加载真实麻将牌图，不再用文本或手绘坐标代替。</p>
         </div>
       </div>
 
