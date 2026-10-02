@@ -44,8 +44,8 @@ const defaultPatternPoints = {
 const defaultAdminData = {
   scoring: {
     baseMultiplier: 1,
-    dealerMultiplierBonus: 1,
-    selfDrawMultiplierBonus: 1,
+    dealerMultiplier: 2,
+    selfDrawFactor: 2,
     discardPayerOnly: true,
     patterns: defaultPatternPoints,
     actions: { "明杠": 1, "暗杠": 2, "补杠": 1 }
@@ -464,19 +464,18 @@ function recordKongEvent(room, ownerSeat, kind, fromSeat = null) {
 function winnerMultiplier(room, winnerSeat, method) {
   const scoring = adminData.scoring;
   return (Number(scoring.baseMultiplier) || 0)
-    + (winnerSeat === room.dealerSeat ? (Number(scoring.dealerMultiplierBonus) || 0) : 0)
-    + (method === "自摸" ? (Number(scoring.selfDrawMultiplierBonus) || 0) : 0);
+    * (winnerSeat === room.dealerSeat ? (Number(scoring.dealerMultiplier) || 1) : 1)
+    * (method === "自摸" ? (Number(scoring.selfDrawFactor) || 1) : 1);
 }
 
-function kongSettlement(room, winnerSeat = null, method = null) {
+function kongSettlement(room) {
   const deltas = [0, 0, 0, 0];
   const earned = [0, 0, 0, 0];
   const details = [];
   for (const event of room.kongEvents || []) {
     const unit = Number(adminData.scoring.actions[event.kind]) || 0;
     if (!unit) continue;
-    const multiplier = event.ownerSeat === winnerSeat ? winnerMultiplier(room, winnerSeat, method) : 1;
-    const payment = unit * multiplier;
+    const payment = unit;
     const payers = event.kind === "明杠" && Number.isInteger(event.fromSeat)
       ? [event.fromSeat]
       : [0, 1, 2, 3].filter((seat) => seat !== event.ownerSeat);
@@ -546,24 +545,23 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
   const evaluation = evaluateWin(winner, winner.hand);
   const scoring = adminData.scoring;
   const items = [];
-  let handPoints = Number(scoring.patterns["普通胡"]) || 0;
-  items.push({ name: "普通胡", points: handPoints });
-  for (const pattern of evaluation.patterns) {
+  const scoredPatterns = [...evaluation.patterns];
+  if (gangShangKaiHua) scoredPatterns.push("杠上开花");
+  const appliedPatterns = scoredPatterns.length ? scoredPatterns : ["普通胡"];
+  let handPoints = 0;
+  for (const pattern of appliedPatterns) {
     const points = scoring.patterns[pattern] || 0;
     handPoints += points;
     items.push({ name: pattern, points });
   }
   if (gangShangKaiHua) {
-    const points = scoring.patterns["杠上开花"] || 0;
-    handPoints += points;
-    items.push({ name: "杠上开花", points });
     evaluation.patterns.push("杠上开花");
   }
 
   const multiplier = winnerMultiplier(room, winnerSeat, method);
   const payment = handPoints * multiplier;
   items.push({ name: "胡法分小计", points: handPoints });
-  items.push({ name: `总倍率（基础${scoring.baseMultiplier}+庄家${winnerSeat === room.dealerSeat ? scoring.dealerMultiplierBonus : 0}+自摸${method === "自摸" ? scoring.selfDrawMultiplierBonus : 0}）`, points: multiplier });
+  items.push({ name: `总倍率（基础${scoring.baseMultiplier}×庄家${winnerSeat === room.dealerSeat ? scoring.dealerMultiplier : 1}×自摸${method === "自摸" ? scoring.selfDrawFactor : 1}）`, points: multiplier });
 
   const deltas = [0, 0, 0, 0];
   if (method === "自摸") {
@@ -588,9 +586,9 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
     }
   }
 
-  const kong = kongSettlement(room, winnerSeat, method);
+  const kong = kongSettlement(room);
   for (let seat = 0; seat < 4; seat += 1) deltas[seat] += kong.deltas[seat];
-  if (kong.earned[winnerSeat]) items.push({ name: "赢家其他得分（已乘总倍率）", points: kong.earned[winnerSeat] });
+  if (kong.earned[winnerSeat]) items.push({ name: "赢家杠得分（不乘倍率）", points: kong.earned[winnerSeat] });
   items.push(...kong.details);
 
   for (let seat = 0; seat < 4; seat += 1) {
@@ -1472,9 +1470,10 @@ function estimatedSelfDrawGain(room, seat, player, hand, gangShangKaiHua = false
   const evaluation = evaluateWin(player, hand);
   if (!evaluation.valid) return 0;
   const scoring = adminData.scoring;
-  let points = Number(scoring.patterns["普通胡"]) || 0;
-  for (const pattern of evaluation.patterns) points += scoring.patterns[pattern] || 0;
-  if (gangShangKaiHua) points += scoring.patterns["杠上开花"] || 0;
+  const patterns = [...evaluation.patterns];
+  if (gangShangKaiHua) patterns.push("杠上开花");
+  const appliedPatterns = patterns.length ? patterns : ["普通胡"];
+  const points = appliedPatterns.reduce((total, pattern) => total + (Number(scoring.patterns[pattern]) || 0), 0);
   return points * winnerMultiplier(room, seat, "自摸") * 3;
 }
 
@@ -1498,8 +1497,8 @@ function concealedKongPaths(room, seat, player, hand) {
       const copies = Math.max(0, 4 - visibleTileCount(room, seat, supplement) - Number(supplement === tile));
       if (!copies) continue;
       const supplemented = [...reduced, supplement];
+      if (!evaluateWin(kongPlayer, supplemented).valid) continue;
       const gain = estimatedSelfDrawGain(room, seat, kongPlayer, supplemented, true);
-      if (!gain) continue;
       supplementWinningCopies += copies;
       supplementExpectedGain += copies * gain;
       supplementTiles.push(supplement);
@@ -1976,7 +1975,7 @@ function roomSnapshot(room, viewerSeat) {
       })()
       : null;
   return {
-    version: "3.7",
+    version: "3.8",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -2079,8 +2078,8 @@ function handleAdminMessage(client, data) {
   } else if (data.type === "adminUpdateScoring") {
     const incoming = data.scoring || {};
     adminData.scoring.baseMultiplier = numericSetting(incoming.baseMultiplier, adminData.scoring.baseMultiplier, 1, 20);
-    adminData.scoring.dealerMultiplierBonus = numericSetting(incoming.dealerMultiplierBonus, adminData.scoring.dealerMultiplierBonus, 0, 20);
-    adminData.scoring.selfDrawMultiplierBonus = numericSetting(incoming.selfDrawMultiplierBonus, adminData.scoring.selfDrawMultiplierBonus, 0, 20);
+    adminData.scoring.dealerMultiplier = numericSetting(incoming.dealerMultiplier, adminData.scoring.dealerMultiplier, 1, 20);
+    adminData.scoring.selfDrawFactor = numericSetting(incoming.selfDrawFactor, adminData.scoring.selfDrawFactor, 1, 20);
     adminData.scoring.discardPayerOnly = incoming.discardPayerOnly !== false;
     for (const key of Object.keys(defaultPatternPoints)) {
       adminData.scoring.patterns[key] = numericSetting(incoming.patterns?.[key], adminData.scoring.patterns[key]);

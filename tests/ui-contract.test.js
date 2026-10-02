@@ -243,7 +243,15 @@ test("补杠、直接杠优先与局末统一结算均由服务端约束", () =>
   assert.match(serverSource, /function kongSettlement/);
   assert.doesNotMatch(serverSource, /function settleKongPoints/);
   assert.match(appSource, /基础倍率/);
-  assert.match(appSource, /庄家倍率加成/);
-  assert.match(appSource, /自摸倍率加成/);
+  assert.match(appSource, /庄家倍率/);
+  assert.match(appSource, /自摸倍率/);
   assert.match(appSource, /局结束时统一结算/);
+});
+
+test("积分使用乘法倍率且管理员出牌提醒可点击关闭", () => {
+  assert.match(serverSource, /Number\(scoring\.baseMultiplier\)[\s\S]*?\* \(winnerSeat === room\.dealerSeat/);
+  assert.match(serverSource, /const appliedPatterns = scoredPatterns\.length \? scoredPatterns : \["普通胡"\]/);
+  assert.match(serverSource, /const kong = kongSettlement\(room\)/);
+  assert.match(appSource, /data-dismiss-suggestion/);
+  assert.match(appSource, /adminSuggestion = null; render\(\);/);
 });
