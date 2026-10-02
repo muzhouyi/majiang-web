@@ -243,11 +243,12 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 
 .opponent-hand { display: grid; grid-template-columns: repeat(13, var(--opponent-tile-width)); gap: 1px; width: max-content; margin-top: 3px; transform-origin: center; }
 .opponent-slot { display: grid; place-items: center; width: var(--opponent-tile-width); height: var(--opponent-tile-height); }
-.tile-opponent-size { width: var(--opponent-tile-width); height: var(--opponent-tile-height); min-width: var(--opponent-tile-width); }
 .tile-back {
-  display: block; width: 100%; height: 100%; border: 1px solid #0b4e42; border-radius: 3px;
+  display: block; box-sizing: border-box; width: 100%; height: 100%; border: 1px solid #0b4e42; border-radius: 3px;
   background: #247b69; box-shadow: inset 0 0 0 2px #2f8b77, 0 1px 2px rgba(0,0,0,.24);
 }
+.tile-back-revealed { overflow: hidden; border-color: transparent; background: transparent; box-shadow: none; }
+.tile-back-revealed .tile-face { width: 100%; height: 100%; object-fit: fill; }
 .opponent-melds { position: absolute; z-index: 2; }
 .opponent-melds:empty { display: none; }
 .opponent-melds .tile-micro,
@@ -276,8 +277,6 @@ button.danger-quiet { border-color: #76514d; color: #efada6; }
 .seat-left .tile-back, .seat-right .tile-back { width: var(--opponent-tile-width); height: var(--opponent-tile-height); }
 .seat-left .tile-back { transform: rotate(90deg); }
 .seat-right .tile-back { transform: rotate(-90deg); }
-.seat-left .tile-opponent-size { transform: rotate(90deg); }
-.seat-right .tile-opponent-size { transform: rotate(-90deg); }
 .seat-left .opponent-melds {
   left: calc(var(--opponent-tile-height) + 48px); top: 34px;
   transform: rotate(90deg); transform-origin: top left;

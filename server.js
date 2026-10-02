@@ -1530,7 +1530,7 @@ function roomSnapshot(room, viewerSeat) {
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   const viewerIsHost = viewer?.profileId === room.hostProfileId;
   return {
-    version: "3.2",
+    version: "3.3",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
