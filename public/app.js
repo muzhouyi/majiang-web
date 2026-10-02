@@ -29,6 +29,8 @@ let adminReplay = null;
 let replayFrameIndex = 0;
 let adminTapCount = 0;
 let adminTapStartedAt = 0;
+let lobbyDirectoryOpen = false;
+let lobbyRooms = [];
 let name = localStorage.getItem("majiang:name") || `玩家${Math.floor(Math.random() * 90) + 10}`;
 let profileId = localStorage.getItem(PROFILE_KEY);
 if (!profileId) {
@@ -47,12 +49,23 @@ function connect() {
   socket = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}`);
   socket.addEventListener("open", () => {
     connection = "已连接";
+    if (state?.roomId) send({ type: "join", roomId: state.roomId, name, profileId });
     render();
   });
   socket.addEventListener("message", (event) => {
     const payload = JSON.parse(event.data);
     if (payload.type === "state") {
       state = payload.state;
+      lobbyDirectoryOpen = false;
+      if (state.viewerProfileId && state.viewerProfileId !== profileId) {
+        profileId = state.viewerProfileId;
+        localStorage.setItem(PROFILE_KEY, profileId);
+      }
+      const selfPlayer = state.players[state.viewerSeat];
+      if (selfPlayer?.name && selfPlayer.name !== name) {
+        name = selfPlayer.name;
+        localStorage.setItem("majiang:name", name);
+      }
       latestDiscardTileId = state.latestDiscardTileId || null;
       drawnTileId = state.drawnTileId || null;
       const handIds = new Set(state.players[state.viewerSeat]?.hand?.map((entry) => entry.tileId) || []);
@@ -64,8 +77,18 @@ function connect() {
       drawnTileId = null;
       selectedTileId = null;
       toast = "已退出房间";
+    } else if (payload.type === "kicked") {
+      state = null;
+      latestDiscardTileId = null;
+      drawnTileId = null;
+      selectedTileId = null;
+      toast = payload.message || "你已被移出房间。";
+    } else if (payload.type === "lobbyRooms") {
+      lobbyRooms = payload.rooms || [];
+      lobbyDirectoryOpen = true;
     } else if (payload.type === "error") {
       toast = payload.message;
+      if (state?.roomId && payload.message === "没有找到这个房间。") state = null;
     } else if (payload.type === "adminData") {
       adminUnlocked = true;
       adminOpen = true;
@@ -193,11 +216,25 @@ function renderMelds(melds) {
   return melds?.length ? `<div class="meld-shelf">${melds.map(renderMeld).join("")}</div>` : "";
 }
 
+function renderLobbyDirectory() {
+  if (!lobbyDirectoryOpen) return "";
+  const rooms = lobbyRooms.length ? lobbyRooms.map((room) => {
+    const status = room.status === "waiting" ? "等待开局" : room.status === "ended" ? "本局结束" : "进行中";
+    const action = room.canRejoin
+      ? `<button class="primary" type="button" data-directory-join="${escapeHtml(room.id)}">重新加入</button>`
+      : room.canJoin
+        ? `<button type="button" data-directory-join="${escapeHtml(room.id)}">加入</button>`
+        : '<button type="button" disabled>不可加入</button>';
+    return `<div class="directory-row"><div class="directory-room"><strong>${escapeHtml(room.id)}</strong><span class="directory-status status-${room.status}">${status}</span><small>房主 ${escapeHtml(room.hostName)} · 真人 ${room.humanSeats}/4</small><small>${escapeHtml(room.players.join(" / ") || "暂无玩家")}</small></div>${action}</div>`;
+  }).join("") : '<p class="admin-empty">当前还没有在线房间。</p>';
+  return `<div class="directory-backdrop"><section class="directory-dialog" role="dialog" aria-modal="true" aria-labelledby="directoryTitle"><header><div><p class="eyebrow">在线房间</p><h2 id="directoryTitle">麻将大厅</h2></div><button type="button" data-directory-close aria-label="关闭">×</button></header><div class="directory-toolbar"><span>${lobbyRooms.length} 个房间</span><button type="button" data-directory-refresh>刷新</button></div><div class="directory-list">${rooms}</div></section></div>`;
+}
+
 function renderLobby() {
   app.innerHTML = `<section class="lobby">
     <div class="lobby-brand">
       <button class="brand-mark admin-trigger" type="button" data-admin-trigger aria-label="青桌麻将">${renderTile("C")}</button>
-      <div><p class="eyebrow">东光规则 · v2.5</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
+      <div><p class="eyebrow">东光规则 · v2.6</p><h1>青桌麻将</h1><p class="lede">摸牌有声，落牌有数。坐下开一桌。</p></div>
     </div>
     <form class="join-panel" id="lobbyForm">
       <div class="connection-line"><span class="status-dot"></span>${connection}</div>
@@ -210,9 +247,10 @@ function renderLobby() {
         <button class="primary" type="button" id="soloBtn">单人开局</button>
         <button type="button" id="createBtn">创建房间</button>
         <button type="submit">加入房间</button>
+        <button type="button" id="directoryBtn">查看大厅</button>
       </div>
     </form>
-  </section>${renderAdminLayer()}`;
+  </section>${renderLobbyDirectory()}${renderAdminLayer()}`;
 
   app.querySelector("#nameInput").addEventListener("input", (event) => {
     name = event.target.value.trim() || "玩家";
@@ -220,6 +258,10 @@ function renderLobby() {
   });
   app.querySelector("#soloBtn").addEventListener("click", () => send({ type: "create", mode: "solo", name, profileId }));
   app.querySelector("#createBtn").addEventListener("click", () => send({ type: "create", mode: "online", name, profileId }));
+  app.querySelector("#directoryBtn").addEventListener("click", () => { lobbyDirectoryOpen = true; render(); send({ type: "listRooms", profileId }); });
+  app.querySelector("[data-directory-close]")?.addEventListener("click", () => { lobbyDirectoryOpen = false; render(); });
+  app.querySelector("[data-directory-refresh]")?.addEventListener("click", () => send({ type: "listRooms", profileId }));
+  app.querySelectorAll("[data-directory-join]").forEach((button) => button.addEventListener("click", () => send({ type: "join", roomId: button.dataset.directoryJoin, name, profileId })));
   app.querySelector("#lobbyForm").addEventListener("submit", (event) => {
     event.preventDefault();
     const roomId = app.querySelector("#roomInput").value.trim().toUpperCase();
@@ -337,8 +379,10 @@ function renderAdminReplay() {
 
 function renderAdminPlayers() {
   const players = adminData.players || [];
+  const mergeOptions = players.map((player) => `<option value="${escapeHtml(player.id)}">${escapeHtml(player.name)} · ${player.score}分</option>`).join("");
   return `<section class="admin-section player-score-settings"><label class="admin-toggle"><span><strong>记录玩家积分变动</strong><small>关闭后牌局仍正常结算，但不再把变化累计到真实玩家档案。</small></span><input type="checkbox" data-player-scores-enabled ${adminData.playerScores?.enabled !== false ? "checked" : ""} /></label></section>
-  <section class="admin-section"><h3>真实玩家积分</h3><div class="player-admin-list">${players.length ? players.map((player) => `<form class="player-admin-row" data-player-form="${escapeHtml(player.id)}"><span><strong>${escapeHtml(player.name)}</strong><small>${new Date(player.updatedAt).toLocaleString()}</small></span><input type="number" value="${player.score}" data-player-score aria-label="${escapeHtml(player.name)}的积分" /><button type="submit">修改</button><button type="button" class="danger-quiet" data-reset-player="${escapeHtml(player.id)}">重置</button><button type="button" class="danger-quiet" data-delete-player="${escapeHtml(player.id)}" data-player-name="${escapeHtml(player.name)}">删除</button></form>`).join("") : '<p class="admin-empty">暂无真实玩家记录。</p>'}</div></section>`;
+  <section class="admin-section"><h3>合并玩家记录</h3><p class="admin-note">来源账号的积分会累加到保留账号，随后删除来源记录。</p>${players.length >= 2 ? `<form class="merge-player-form" id="mergePlayerForm"><label><span>来源账号</span><select data-merge-source>${mergeOptions}</select></label><span aria-hidden="true">→</span><label><span>保留账号</span><select data-merge-target>${mergeOptions}</select></label><button class="danger-quiet" type="submit">合并</button></form>` : '<p class="admin-empty">至少需要两条玩家记录才能合并。</p>'}</section>
+  <section class="admin-section"><h3>真实玩家积分</h3><div class="player-admin-list">${players.length ? players.map((player) => `<form class="player-admin-row" data-player-form="${escapeHtml(player.id)}"><div class="player-admin-meta"><strong>${escapeHtml(player.name)}</strong><small>${new Date(player.updatedAt).toLocaleString()}</small></div><label><span>昵称</span><input type="text" maxlength="12" value="${escapeHtml(player.name)}" data-player-name-input /></label><label><span>积分</span><input type="number" value="${player.score}" data-player-score /></label><div class="player-admin-actions"><button type="submit">改分</button><button type="button" data-rename-player="${escapeHtml(player.id)}">改名</button><button type="button" class="danger-quiet" data-reset-player="${escapeHtml(player.id)}">重置</button><button type="button" class="danger-quiet" data-delete-player="${escapeHtml(player.id)}" data-player-name="${escapeHtml(player.name)}">删除</button></div></form>`).join("") : '<p class="admin-empty">暂无真实玩家记录。</p>'}</div></section>`;
 }
 
 function renderAdminLayer() {
@@ -347,7 +391,7 @@ function renderAdminLayer() {
     return `<div class="admin-backdrop"><section class="admin-dialog admin-login" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button><p class="eyebrow">管理者验证</p><h2 id="adminTitle">管理者设置</h2><form id="adminLoginForm"><label for="adminPassword">密码</label><input id="adminPassword" type="password" inputmode="numeric" autocomplete="current-password" required autofocus /><button class="primary" type="submit">进入设置</button></form>${toast ? `<p class="toast">${escapeHtml(toast)}</p>` : ""}</section></div>`;
   }
   const content = adminTab === "replay" ? renderAdminReplay() : adminTab === "players" ? renderAdminPlayers() : renderAdminScoring();
-  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.5</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
+  return `<div class="admin-backdrop"><section class="admin-dialog" role="dialog" aria-modal="true" aria-labelledby="adminTitle"><header class="admin-header"><div><p class="eyebrow">青桌麻将 · v2.6</p><h2 id="adminTitle">管理者设置</h2></div><button class="admin-close" type="button" data-admin-close aria-label="关闭">×</button></header><nav class="admin-tabs" aria-label="管理设置分类">
     <button type="button" data-admin-tab="scoring" aria-current="${adminTab === "scoring"}">积分</button>
     <button type="button" data-admin-tab="replay" aria-current="${adminTab === "replay"}">回放</button>
     <button type="button" data-admin-tab="players" aria-current="${adminTab === "players"}">玩家</button>
@@ -400,6 +444,28 @@ function bindAdminEvents() {
     event.preventDefault();
     send({ type: "adminUpdatePlayer", playerId: form.dataset.playerForm, score: Number(form.querySelector("[data-player-score]").value) });
   }));
+  const mergeForm = app.querySelector("#mergePlayerForm");
+  if (mergeForm) {
+    const target = mergeForm.querySelector("[data-merge-target]");
+    if (target.options.length > 1) target.selectedIndex = 1;
+    mergeForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const sourceSelect = mergeForm.querySelector("[data-merge-source]");
+      const targetSelect = mergeForm.querySelector("[data-merge-target]");
+      if (sourceSelect.value === targetSelect.value) { toast = "来源账号和保留账号不能相同。"; render(); return; }
+      const sourceName = sourceSelect.options[sourceSelect.selectedIndex].text;
+      const targetName = targetSelect.options[targetSelect.selectedIndex].text;
+      if (window.confirm(`确定将 ${sourceName} 合并到 ${targetName} 吗？来源记录会被删除。`)) {
+        send({ type: "adminMergePlayers", sourcePlayerId: sourceSelect.value, targetPlayerId: targetSelect.value });
+      }
+    });
+  }
+  app.querySelectorAll("[data-rename-player]").forEach((button) => button.addEventListener("click", () => {
+    const form = button.closest("[data-player-form]");
+    const newName = form.querySelector("[data-player-name-input]").value.trim();
+    if (!newName) { toast = "昵称不能为空。"; render(); return; }
+    if (window.confirm(`确定将玩家昵称改为“${newName}”吗？`)) send({ type: "adminRenamePlayer", playerId: button.dataset.renamePlayer, name: newName });
+  }));
   app.querySelectorAll("[data-reset-player]").forEach((button) => button.addEventListener("click", () => send({ type: "adminResetPlayer", playerId: button.dataset.resetPlayer })));
   app.querySelectorAll("[data-delete-player]").forEach((button) => button.addEventListener("click", () => {
     if (window.confirm(`确定删除 ${button.dataset.playerName} 的积分记录吗？`)) send({ type: "adminDeletePlayer", playerId: button.dataset.deletePlayer });
@@ -449,7 +515,11 @@ function renderActions() {
     buttons.push('<button type="button" data-action="addBots">补电脑</button>');
     buttons.push('<button class="primary" type="button" data-action="start">开始</button>');
   }
-  if (state.winner && state.viewerSeat === state.hostSeat) buttons.push('<button class="primary" type="button" data-action="restart">再来一局</button>');
+  if (state.canRequestRestart) buttons.push('<button class="primary" type="button" data-action="requestRestart">重新开局</button>');
+  if (state.restartVote && !state.restartVote.viewerApproved) {
+    buttons.push('<button class="primary" type="button" data-action="approveRestart">同意重开</button>');
+    buttons.push('<button class="danger-quiet" type="button" data-action="rejectRestart">拒绝</button>');
+  }
   if (state.canSelfWin) buttons.push('<button class="win" type="button" data-action="selfWin">自摸</button>');
   if (state.canRon) buttons.push('<button class="win" type="button" data-action="ron">胡</button>');
   if (state.canKong) buttons.push('<button class="call" type="button" data-action="kong">明杠</button>');
@@ -470,6 +540,7 @@ function renderActions() {
 function renderInfoContent() {
   const fallbackStep = state.log.length;
   return `<section class="room-panel"><div><small>房间号</small><strong>${state.roomId}</strong></div><button type="button" data-action="copy">复制</button><button class="danger-quiet" type="button" data-action="leave">退出房间</button></section>
+    ${state.restartVote ? `<section class="restart-status"><strong>重新开局确认中</strong><span>${state.restartVote.approvedSeats.length} 个真人座位已同意，人机默认同意</span></section>` : ""}
     ${renderResult()}
     <section class="score-panel"><h2>积分</h2>${state.players.filter(Boolean).map(renderScore).join("")}</section>
     <details class="log-panel" open><summary>牌局记录</summary><ol reversed>${state.log.map((entry, index) => `<li value="${entry.step || fallbackStep - index}">${escapeHtml(entry.text)}</li>`).join("")}</ol></details>`;
@@ -477,7 +548,10 @@ function renderInfoContent() {
 
 function renderScore(player) {
   const deltaClass = player.roundDelta > 0 ? "score-up" : player.roundDelta < 0 ? "score-down" : "";
-  return `<div class="score-line ${player.seat === state.viewerSeat ? "score-self" : ""}"><span class="wind">${player.wind}</span><span><strong>${escapeHtml(player.name)}</strong><small>${player.routeLabel || (player.isBot ? "电脑" : "玩家")}</small></span><b>${player.score}</b><em class="${deltaClass}">${player.roundDelta > 0 ? "+" : ""}${player.roundDelta}</em></div>`;
+  const role = player.delegated ? "电脑托管" : player.isBot ? "电脑" : "玩家";
+  const kick = state.canKick && !player.isBot && player.seat !== state.viewerSeat
+    ? `<button class="danger-quiet score-kick" type="button" data-kick-seat="${player.seat}" data-player-name="${escapeHtml(player.name)}">踢出</button>` : "";
+  return `<div class="score-line ${kick ? "has-control" : ""} ${player.seat === state.viewerSeat ? "score-self" : ""}"><span class="wind">${player.wind}</span><span><strong>${escapeHtml(player.name)}</strong><small>${player.routeLabel || role}</small></span><b>${player.score}</b><em class="${deltaClass}">${player.roundDelta > 0 ? "+" : ""}${player.roundDelta}</em>${kick}</div>`;
 }
 
 function renderResult() {
@@ -554,13 +628,18 @@ function bindGameEvents() {
         render();
         return;
       }
+      if (action === "requestRestart" && !window.confirm("确定发起重新开局吗？所有真人玩家同意后才会重开。")) return;
       const messages = {
-        leave: { type: "leave" }, addBots: { type: "addBots" }, start: { type: "start" }, restart: { type: "restart" },
+        leave: { type: "leave" }, addBots: { type: "addBots" }, start: { type: "start" }, requestRestart: { type: "requestRestart" },
+        approveRestart: { type: "respondRestart", approved: true }, rejectRestart: { type: "respondRestart", approved: false },
         selfWin: { type: "selfWin" }, ron: { type: "ron" }, pong: { type: "pong" }, kong: { type: "kong" }, pass: { type: "pass" }
       };
       if (messages[action]) send(messages[action]);
     });
   });
+  app.querySelectorAll("[data-kick-seat]").forEach((button) => button.addEventListener("click", () => {
+    if (window.confirm(`确定在开局前将 ${button.dataset.playerName} 移出房间吗？`)) send({ type: "kick", seat: Number(button.dataset.kickSeat) });
+  }));
   bindAdminEvents();
 }
 

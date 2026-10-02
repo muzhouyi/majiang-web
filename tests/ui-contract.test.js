@@ -136,3 +136,31 @@ test("明杠暗杠使用四张并进入现有明示牌架", () => {
   assert.match(serverSource, /type: "concealed-kong"/);
   assert.match(serverSource, /drawForCurrent\(room, true\)/);
 });
+
+test("主界面大厅支持发现房间和原玩家重新加入", () => {
+  assert.match(appSource, /id="directoryBtn">查看大厅/);
+  assert.match(appSource, /type: "listRooms"/);
+  assert.match(appSource, /data-directory-join/);
+  assert.match(serverSource, /function roomDirectory/);
+  assert.match(serverSource, /reconnectClient\(room, client\)/);
+  assert.match(serverSource, /delegatedSeatForProfile/);
+});
+
+test("房主开局前可踢人且重新开局需要真人投票", () => {
+  assert.match(appSource, /data-kick-seat/);
+  assert.match(appSource, /type: "requestRestart"/);
+  assert.match(appSource, /type: "respondRestart"/);
+  assert.match(serverSource, /room\.phase === "waiting"[\s\S]*?data\.type === "kick"/);
+  assert.match(serverSource, /function completeRestartVoteIfReady/);
+  assert.match(serverSource, /seat && !seat\.isBot/);
+});
+
+test("管理员重命名和合并玩家前均要求二次确认", () => {
+  assert.match(appSource, /data-rename-player/);
+  assert.match(appSource, /id="mergePlayerForm"/);
+  assert.match(appSource, /确定将玩家昵称改为/);
+  assert.match(appSource, /来源记录会被删除/);
+  assert.match(serverSource, /adminRenamePlayer/);
+  assert.match(serverSource, /adminMergePlayers/);
+  assert.match(serverSource, /target\.score = \(Number\(target\.score\)/);
+});

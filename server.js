@@ -5,7 +5,7 @@ const path = require("path");
 
 const PORT = Number(process.env.PORT || 3019);
 const PUBLIC_DIR = path.join(__dirname, "public");
-const DATA_DIR = path.join(__dirname, "data");
+const DATA_DIR = process.env.DATA_DIR || path.join(__dirname, "data");
 const ADMIN_DATA_FILE = path.join(DATA_DIR, "admin-data.json");
 const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || "";
 const WS_GUID = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
@@ -507,6 +507,7 @@ function makePlayer({ id, name, isBot }) {
     route: null,
     stackWindowMeldId: null,
     pungRouteClosed: false,
+    delegated: false,
     ready: true
   };
 }
@@ -518,6 +519,7 @@ function createRoom(hostClient, mode) {
     id,
     mode,
     hostId: hostClient.id,
+    hostProfileId: hostClient.profileId,
     seats: [null, null, null, null],
     wall: [],
     currentSeat: 0,
@@ -530,6 +532,7 @@ function createRoom(hostClient, mode) {
     logSequence: 0,
     replayFrames: [],
     replaySaved: false,
+    restartVote: null,
     timer: null
   };
   rooms.set(id, room);
@@ -545,9 +548,10 @@ function createRoom(hostClient, mode) {
 }
 
 function sitClient(room, client, preferredSeat = -1) {
-  const seat = preferredSeat >= 0 && !room.seats[preferredSeat]
+  const replaceable = (entry) => !entry || (room.phase === "waiting" && entry.isBot && !entry.delegated);
+  const seat = preferredSeat >= 0 && replaceable(room.seats[preferredSeat])
     ? preferredSeat
-    : room.seats.findIndex((entry) => !entry);
+    : room.seats.findIndex(replaceable);
   if (seat === -1) throw new Error("房间已满");
   room.seats[seat] = makePlayer({
     id: client.id,
@@ -556,17 +560,68 @@ function sitClient(room, client, preferredSeat = -1) {
   });
   room.seats[seat].profileId = client.profileId;
   if (client.profileId) {
-    const profile = adminData.players[client.profileId] || { name: room.seats[seat].name, score: 0, updatedAt: Date.now() };
-    profile.name = room.seats[seat].name;
+    const existingProfile = adminData.players[client.profileId];
+    const profile = existingProfile || { name: room.seats[seat].name, score: 0, updatedAt: Date.now() };
+    if (existingProfile) room.seats[seat].name = profile.name;
+    else profile.name = room.seats[seat].name;
     profile.updatedAt = Date.now();
     adminData.players[client.profileId] = profile;
     room.seats[seat].score = Number(profile.score) || 0;
+    client.name = room.seats[seat].name;
     saveAdminData();
   }
   client.roomId = room.id;
   client.seat = seat;
   addLog(room, `${room.seats[seat].name} 坐到了${windName(seat)}位。`);
   return seat;
+}
+
+function delegatedSeatForProfile(room, profileId) {
+  if (!profileId) return -1;
+  return room.seats.findIndex((seat) => seat?.delegated && seat.profileId === profileId);
+}
+
+function reconnectClient(room, client) {
+  const seatIndex = delegatedSeatForProfile(room, client.profileId);
+  if (seatIndex === -1) return false;
+  const player = room.seats[seatIndex];
+  if ((room.phase === "discard" && room.currentSeat === seatIndex)
+    || (room.phase === "claim" && room.pendingClaim?.responders.includes(seatIndex))) clearRoomTimer(room);
+  player.id = client.id;
+  player.name = adminData.players[client.profileId]?.name || client.name || player.name;
+  player.isBot = false;
+  player.connected = true;
+  player.delegated = false;
+  client.name = player.name;
+  client.roomId = room.id;
+  client.seat = seatIndex;
+  addLog(room, `${player.name} 重新加入并接管了${windName(seatIndex)}位。`);
+  broadcastRoom(room);
+  if (room.phase === "claim") scheduleBotClaim(room);
+  return true;
+}
+
+function roomDirectory(profileId) {
+  return [...rooms.values()]
+    .filter((room) => room.mode === "online")
+    .map((room) => {
+      const hostSeat = room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId);
+      const occupied = room.seats.filter(Boolean).length;
+      const humanSeats = room.seats.filter((seat) => seat && (!seat.isBot || seat.delegated)).length;
+      const canRejoin = delegatedSeatForProfile(room, profileId) !== -1;
+      const canJoin = room.phase === "waiting" && room.seats.some((seat) => !seat || (seat.isBot && !seat.delegated));
+      return {
+        id: room.id,
+        status: room.phase === "waiting" ? "waiting" : room.phase === "ended" ? "ended" : "playing",
+        hostName: room.seats[hostSeat]?.name || "房主暂离",
+        occupied,
+        humanSeats,
+        canJoin,
+        canRejoin,
+        players: room.seats.filter(Boolean).map((seat) => seat.name)
+      };
+    })
+    .sort((a, b) => Number(b.canRejoin) - Number(a.canRejoin) || Number(b.canJoin) - Number(a.canJoin) || a.id.localeCompare(b.id));
 }
 
 function fillBots(room) {
@@ -601,6 +656,7 @@ function startGame(room) {
   room.winner = null;
   room.roundResult = null;
   room.pendingClaim = null;
+  room.restartVote = null;
   for (const seat of room.seats) {
     seat.hand = [];
     seat.handTileIds = [];
@@ -1009,7 +1065,7 @@ function persistHumanScores(room) {
   if (!adminData.playerScores.enabled) return;
   let changed = false;
   for (const player of room.seats) {
-    if (!player || player.isBot || !player.profileId) continue;
+    if (!player || (player.isBot && !player.delegated) || !player.profileId) continue;
     adminData.players[player.profileId] = {
       name: player.name,
       score: player.score,
@@ -1039,41 +1095,99 @@ function clearRoomTimer(room) {
   room.timer = null;
 }
 
+function isRoomHost(room, client) {
+  return Boolean(client.profileId && room.hostProfileId === client.profileId);
+}
+
+function transferWaitingHost(room) {
+  const nextHost = room.seats.find((seat) => seat && !seat.isBot);
+  room.hostId = nextHost?.id || null;
+  room.hostProfileId = nextHost?.profileId || null;
+}
+
+function removeWaitingSeat(room, seatIndex, message) {
+  const player = room.seats[seatIndex];
+  if (!player) return;
+  room.seats[seatIndex] = null;
+  if (player.profileId === room.hostProfileId) transferWaitingHost(room);
+  if (!room.seats.some((seat) => seat && !seat.isBot)) {
+    clearRoomTimer(room);
+    rooms.delete(room.id);
+    return;
+  }
+  addLog(room, message || `${player.name} 离开了房间。`);
+  broadcastRoom(room);
+}
+
+function completeRestartVoteIfReady(room) {
+  const vote = room.restartVote;
+  if (!vote) return false;
+  const required = room.seats
+    .map((seat, index) => seat && !seat.isBot ? index : -1)
+    .filter((seat) => seat >= 0);
+  if (!required.every((seat) => vote.approvedSeats.includes(seat))) return false;
+  addLog(room, "所有玩家已同意，牌局重新开始。");
+  startGame(room);
+  return true;
+}
+
+function delegateSeat(room, seatIndex, reason = "离开") {
+  const player = room.seats[seatIndex];
+  if (!player || player.isBot) return;
+  if ((room.phase === "discard" && room.currentSeat === seatIndex)
+    || (room.phase === "claim" && room.pendingClaim?.responders.includes(seatIndex))) clearRoomTimer(room);
+  player.id = `bot-${room.id}-${seatIndex}-${makeId(4)}`;
+  player.isBot = true;
+  player.connected = true;
+  player.delegated = true;
+  addLog(room, `${player.name} ${reason}，已由电脑托管。`);
+  if (completeRestartVoteIfReady(room)) return;
+  broadcastRoom(room);
+  if (room.phase === "discard" && room.currentSeat === seatIndex) {
+    room.timer = setTimeout(() => botDiscard(room), 360);
+  } else if (room.phase === "claim") {
+    scheduleBotClaim(room);
+  }
+}
+
 function leaveRoom(client) {
   const room = rooms.get(client.roomId);
   if (!room || client.seat < 0) return;
   const seatIndex = client.seat;
-  const player = room.seats[seatIndex];
   client.roomId = null;
   client.seat = -1;
-
-  if (room.phase === "waiting") {
-    room.seats[seatIndex] = null;
-  } else if (player) {
-    player.id = `bot-${room.id}-${seatIndex}-${makeId(4)}`;
-    player.name = `${player.name}（托管）`;
-    player.isBot = true;
-    player.connected = true;
-  }
-
-  const humans = room.seats.filter((seat) => seat && !seat.isBot);
-  if (!humans.length) {
-    clearRoomTimer(room);
-    rooms.delete(room.id);
-  } else {
-    if (room.hostId === player?.id || !humans.some((seat) => seat.id === room.hostId)) {
-      room.hostId = humans[0].id;
-    }
-    addLog(room, `${player?.name || "玩家"} 退出了房间。`);
-    broadcastRoom(room);
-    if (room.phase === "discard" && room.currentSeat === seatIndex && room.seats[seatIndex]?.isBot) {
-      clearRoomTimer(room);
-      room.timer = setTimeout(() => botDiscard(room), 360);
-    } else if (room.phase === "claim" && room.pendingClaim?.responders.includes(seatIndex)) {
-      scheduleBotClaim(room);
-    }
-  }
+  if (room.phase === "waiting") removeWaitingSeat(room, seatIndex);
+  else delegateSeat(room, seatIndex);
   sendJson(client.socket, { type: "left" });
+}
+
+function requestRestart(room, client) {
+  if (!isRoomHost(room, client) || room.phase === "waiting") return false;
+  if (room.restartVote) return false;
+  room.restartVote = {
+    requestedBySeat: client.seat,
+    approvedSeats: [client.seat],
+    createdAt: Date.now()
+  };
+  addLog(room, `${room.seats[client.seat].name} 发起重新开局，等待其他玩家同意。`);
+  if (!completeRestartVoteIfReady(room)) broadcastRoom(room);
+  return true;
+}
+
+function respondRestart(room, client, approved) {
+  const vote = room.restartVote;
+  if (!vote || room.phase === "waiting" || client.seat < 0) return false;
+  if (!approved) {
+    const name = room.seats[client.seat]?.name || "玩家";
+    room.restartVote = null;
+    addLog(room, `${name} 拒绝重新开局，本次请求已取消。`);
+    broadcastRoom(room);
+    return true;
+  }
+  if (!vote.approvedSeats.includes(client.seat)) vote.approvedSeats.push(client.seat);
+  addLog(room, `${room.seats[client.seat].name} 同意重新开局。`);
+  if (!completeRestartVoteIfReady(room)) broadcastRoom(room);
+  return true;
 }
 
 function routeLabel(player) {
@@ -1087,12 +1201,15 @@ function roomSnapshot(room, viewerSeat) {
   const claim = room.pendingClaim;
   const isResponder = Boolean(claim && claim.responders.includes(viewerSeat) && !claim.passed.includes(viewerSeat));
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
+  const viewerIsHost = viewer?.profileId === room.hostProfileId;
   return {
-    version: "2.5",
+    version: "2.6",
     roomId: room.id,
     mode: room.mode,
-    hostSeat: room.seats.findIndex((seat) => seat && seat.id === room.hostId),
+    hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
     viewerSeat,
+    viewerProfileId: viewer?.profileId || null,
+    viewerIsHost,
     phase: room.phase,
     claimStage: claim?.stage || null,
     currentSeat: room.currentSeat,
@@ -1107,6 +1224,13 @@ function roomSnapshot(room, viewerSeat) {
     canKong: isResponder && claim.stage === "pong" && claim.kongResponders?.includes(viewerSeat),
     canPass: isResponder,
     canDiscard: viewerTurn,
+    canKick: viewerIsHost && room.phase === "waiting",
+    canRequestRestart: viewerIsHost && room.phase !== "waiting" && !room.restartVote,
+    restartVote: room.restartVote ? {
+      requestedBySeat: room.restartVote.requestedBySeat,
+      approvedSeats: [...room.restartVote.approvedSeats],
+      viewerApproved: room.restartVote.approvedSeats.includes(viewerSeat)
+    } : null,
     canSelfWin: viewerTurn && evaluateWin(viewer, viewer?.hand || []).valid,
     concealedKongOptions: viewerTurn ? concealedKongOptions(viewer) : [],
     drillOptions: viewerTurn ? drillCompletionOptions(viewer) : [],
@@ -1116,6 +1240,7 @@ function roomSnapshot(room, viewerSeat) {
       wind: windName(index),
       name: seat.name,
       isBot: seat.isBot,
+      delegated: seat.delegated,
       connected: seat.connected,
       score: seat.score,
       roundDelta: seat.roundDelta,
@@ -1202,6 +1327,65 @@ function handleAdminMessage(client, data) {
     delete adminData.players[playerId];
     saveAdminData();
     sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "玩家积分记录已删除。" });
+  } else if (data.type === "adminRenamePlayer") {
+    const playerId = String(data.playerId || "");
+    const newName = String(data.name || "").trim().slice(0, 12);
+    const player = adminData.players[playerId];
+    if (!player || !newName) {
+      sendJson(client.socket, { type: "adminError", message: "玩家不存在或新昵称无效。" });
+      return true;
+    }
+    player.name = newName;
+    player.updatedAt = Date.now();
+    for (const room of rooms.values()) {
+      const seated = room.seats.find((entry) => entry?.profileId === playerId);
+      if (seated) seated.name = newName;
+      if (seated) broadcastRoom(room);
+    }
+    for (const connectedClient of clients.values()) {
+      if (connectedClient.profileId === playerId) connectedClient.name = newName;
+    }
+    saveAdminData();
+    sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "玩家昵称已重命名。" });
+  } else if (data.type === "adminMergePlayers") {
+    const sourceId = String(data.sourcePlayerId || "");
+    const targetId = String(data.targetPlayerId || "");
+    const source = adminData.players[sourceId];
+    const target = adminData.players[targetId];
+    if (!source || !target || sourceId === targetId) {
+      sendJson(client.socket, { type: "adminError", message: "请选择两个不同的有效玩家记录。" });
+      return true;
+    }
+    const conflict = [...rooms.values()].some((room) => {
+      const profileIds = room.seats.filter(Boolean).map((seat) => seat.profileId);
+      return profileIds.includes(sourceId) && profileIds.includes(targetId);
+    });
+    if (conflict) {
+      sendJson(client.socket, { type: "adminError", message: "这两个玩家当前同时在同一房间，暂时不能合并。" });
+      return true;
+    }
+    target.score = (Number(target.score) || 0) + (Number(source.score) || 0);
+    target.updatedAt = Date.now();
+    delete adminData.players[sourceId];
+    for (const room of rooms.values()) {
+      let changed = false;
+      for (const seated of room.seats) {
+        if (!seated || ![sourceId, targetId].includes(seated.profileId)) continue;
+        seated.profileId = targetId;
+        seated.name = target.name;
+        seated.score = target.score;
+        changed = true;
+      }
+      if (room.hostProfileId === sourceId) room.hostProfileId = targetId;
+      if (changed) broadcastRoom(room);
+    }
+    for (const connectedClient of clients.values()) {
+      if (connectedClient.profileId !== sourceId) continue;
+      connectedClient.profileId = targetId;
+      connectedClient.name = target.name;
+    }
+    saveAdminData();
+    sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "玩家记录已合并，来源积分已并入保留账号。" });
   } else if (data.type === "adminUpdatePlayer" || data.type === "adminResetPlayer") {
     const player = adminData.players[String(data.playerId || "")];
     if (!player) {
@@ -1274,6 +1458,11 @@ function handleMessage(client, message) {
 
   try {
     if (handleAdminMessage(client, data)) return;
+    if (data.type === "listRooms") {
+      const profileId = String(data.profileId || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 64);
+      sendJson(client.socket, { type: "lobbyRooms", rooms: roomDirectory(profileId) });
+      return;
+    }
     if (data.type === "create") {
       client.name = String(data.name || "玩家").slice(0, 12);
       client.profileId = String(data.profileId || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 64) || client.id;
@@ -1285,7 +1474,9 @@ function handleMessage(client, message) {
       client.profileId = String(data.profileId || "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 64) || client.id;
       const room = rooms.get(String(data.roomId || "").trim().toUpperCase());
       if (!room) return sendJson(client.socket, { type: "error", message: "没有找到这个房间。" });
-      if (room.phase !== "waiting") return sendJson(client.socket, { type: "error", message: "牌局已经开始。" });
+      if (reconnectClient(room, client)) return;
+      if (room.seats.some((seat) => seat?.profileId === client.profileId)) return sendJson(client.socket, { type: "error", message: "这个玩家已经在房间中。" });
+      if (room.phase !== "waiting") return sendJson(client.socket, { type: "error", message: "牌局已经开始，只有原座位玩家可以重新加入。" });
       sitClient(room, client);
       broadcastRoom(room);
       return;
@@ -1298,11 +1489,22 @@ function handleMessage(client, message) {
 
     const room = rooms.get(client.roomId);
     if (!room) return;
-    if (data.type === "addBots" && client.id === room.hostId && room.phase === "waiting") {
+    if (data.type === "addBots" && isRoomHost(room, client) && room.phase === "waiting") {
       fillBots(room);
       broadcastRoom(room);
-    } else if (data.type === "start" && client.id === room.hostId && room.phase === "waiting") {
+    } else if (data.type === "start" && isRoomHost(room, client) && room.phase === "waiting") {
       startGame(room);
+    } else if (data.type === "kick" && isRoomHost(room, client) && room.phase === "waiting") {
+      const targetSeat = Number(data.seat);
+      const target = room.seats[targetSeat];
+      if (!target || target.isBot || target.profileId === room.hostProfileId) return;
+      const targetClient = clients.get(target.id);
+      if (targetClient) {
+        targetClient.roomId = null;
+        targetClient.seat = -1;
+        sendJson(targetClient.socket, { type: "kicked", message: "房主已将你移出房间。" });
+      }
+      removeWaitingSeat(room, targetSeat, `${target.name} 被房主移出房间。`);
     } else if (data.type === "discard") {
       discardTile(room, client.seat, String(data.tileId || ""), String(data.tile || ""));
     } else if (data.type === "declareDrill") {
@@ -1322,8 +1524,10 @@ function handleMessage(client, message) {
       claimKong(room, client.seat);
     } else if (data.type === "pass") {
       passClaim(room, client.seat);
-    } else if (data.type === "restart" && client.id === room.hostId) {
-      startGame(room);
+    } else if (data.type === "requestRestart") {
+      requestRestart(room, client);
+    } else if (data.type === "respondRestart") {
+      respondRestart(room, client, Boolean(data.approved));
     }
   } catch (error) {
     sendJson(client.socket, { type: "error", message: error.message });
@@ -1402,9 +1606,8 @@ server.on("upgrade", (req, socket) => {
     if (!room || client.seat < 0) return;
     const seat = room.seats[client.seat];
     if (seat && !seat.isBot) {
-      seat.connected = false;
-      addLog(room, `${seat.name} 断开连接。`);
-      broadcastRoom(room);
+      if (room.phase === "waiting") removeWaitingSeat(room, client.seat, `${seat.name} 断开连接并让出了座位。`);
+      else delegateSeat(room, client.seat, "断开连接");
     }
   });
 });
@@ -1430,5 +1633,8 @@ module.exports = {
   evaluateWin,
   drillCompletionOptions,
   concealedKongOptions,
-  makePlayer
+  makePlayer,
+  delegatedSeatForProfile,
+  roomDirectory,
+  rooms
 };
