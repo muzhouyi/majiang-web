@@ -112,10 +112,11 @@ test("管理者回放展示完整牌面并支持逐步前后切换", () => {
   assert.match(appSource, /replayFrameIndex = 0/);
 });
 
-test("玩家积分累计可由管理者独立关闭", () => {
+test("玩家积分明细记录可关闭且不停止累计总分", () => {
   assert.match(appSource, /data-player-scores-enabled/);
   assert.match(serverSource, /adminUpdatePlayerScores/);
-  assert.match(serverSource, /if \(!adminData\.playerScores\.enabled\) return/);
+  assert.match(serverSource, /adminData\.playerScores\.enabled && delta/);
+  assert.doesNotMatch(serverSource, /function persistHumanScores\(room[^)]*\) \{\s*if \(!adminData\.playerScores\.enabled\) return/);
 });
 
 test("管理者可以删除单局回放和单个玩家积分记录", () => {
@@ -197,4 +198,15 @@ test("重新开局藏入牌局且横屏即时操作区固定右对齐", () => {
   assert.match(cssSource, /\.layout-landscape \.action-dock\s*\{[\s\S]*?position:\s*fixed;[^}]*right:\s*max\(8px, env\(safe-area-inset-right\)\);[^}]*justify-content:\s*flex-end;/);
   assert.match(cssSource, /\.layout-landscape \.action-buttons\s*\{[^}]*margin-left:\s*auto;[^}]*justify-content:\s*flex-end;/);
   assert.match(cssSource, /\.layout-landscape \.turn-copy\s*\{\s*display:\s*none;/);
+});
+
+test("玩家页提供积分明细开关和清单且牌局面板位于顶层", () => {
+  assert.match(appSource, /data-score-details/);
+  assert.match(appSource, /class="score-history-row"/);
+  assert.match(appSource, /data-clear-score-history/);
+  assert.match(serverSource, /playerScores: \{ enabled: true, history: \[\] \}/);
+  assert.match(serverSource, /adminClearPlayerScoreHistory/);
+  assert.match(cssSource, /\.layout-landscape \.mobile-info\s*\{[^}]*z-index:\s*180/);
+  assert.match(cssSource, /\.layout-portrait \.mobile-info\s*\{[^}]*z-index:\s*180/);
+  assert.match(appSource, /<\/header>\s*<details class="mobile-info"/);
 });

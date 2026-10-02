@@ -50,7 +50,7 @@ const defaultAdminData = {
     actions: { "明杠": 0, "暗杠": 0 }
   },
   replay: { enabled: true },
-  playerScores: { enabled: true },
+  playerScores: { enabled: true, history: [] },
   players: {},
   replays: []
 };
@@ -72,7 +72,11 @@ function loadAdminData() {
         actions: { ...defaultAdminData.scoring.actions, ...(saved.scoring?.actions || {}) }
       },
       replay: { ...defaultAdminData.replay, ...(saved.replay || {}) },
-      playerScores: { ...defaultAdminData.playerScores, ...(saved.playerScores || {}) },
+      playerScores: {
+        ...defaultAdminData.playerScores,
+        ...(saved.playerScores || {}),
+        history: Array.isArray(saved.playerScores?.history) ? saved.playerScores.history : []
+      },
       players: saved.players || {},
       replays: Array.isArray(saved.replays) ? saved.replays : []
     };
@@ -393,14 +397,17 @@ function settleKongPoints(room, winnerSeat, kind) {
   const points = Number(adminData.scoring.actions[kind]) || 0;
   if (!points) return;
   const winner = room.seats[winnerSeat];
+  const scoreChanges = [0, 0, 0, 0];
   for (let seat = 0; seat < 4; seat += 1) {
     if (seat === winnerSeat) continue;
     room.seats[seat].score -= points;
     room.seats[seat].roundDelta -= points;
     winner.score += points;
     winner.roundDelta += points;
+    scoreChanges[seat] -= points;
+    scoreChanges[winnerSeat] += points;
   }
-  persistHumanScores(room);
+  persistHumanScores(room, scoreChanges, kind);
   addLog(room, `${winner.name} ${kind}结算，每家支付${points}分。`);
 }
 
@@ -473,7 +480,7 @@ function calculateResult(room, winnerSeat, method, winningTile, fromSeat, gangSh
     room.seats[seat].score += deltas[seat];
     room.seats[seat].roundDelta = deltas[seat];
   }
-  persistHumanScores(room);
+  persistHumanScores(room, deltas, `${method}胡牌`);
 
   return {
     winnerSeat,
@@ -1083,18 +1090,32 @@ function finalizeReplay(room) {
   saveAdminData();
 }
 
-function persistHumanScores(room) {
-  if (!adminData.playerScores.enabled) return;
+function persistHumanScores(room, changes = null, reason = "牌局结算") {
   let changed = false;
-  for (const player of room.seats) {
+  for (let seat = 0; seat < room.seats.length; seat += 1) {
+    const player = room.seats[seat];
     if (!player || (player.isBot && !player.delegated) || !player.profileId) continue;
     adminData.players[player.profileId] = {
       name: player.name,
       score: player.score,
       updatedAt: Date.now()
     };
+    const delta = Number(changes?.[seat]) || 0;
+    if (adminData.playerScores.enabled && delta) {
+      adminData.playerScores.history.unshift({
+        id: `${room.id}-${Date.now()}-${seat}-${makeId(4)}`,
+        roomId: room.id,
+        profileId: player.profileId,
+        name: player.name,
+        reason,
+        delta,
+        scoreAfter: player.score,
+        createdAt: Date.now()
+      });
+    }
     changed = true;
   }
+  adminData.playerScores.history = adminData.playerScores.history.slice(0, 500);
   if (changed) saveAdminData();
 }
 
@@ -1292,7 +1313,7 @@ function roomSnapshot(room, viewerSeat) {
   const viewerTurn = room.phase === "discard" && room.currentSeat === viewerSeat && !room.winner;
   const viewerIsHost = viewer?.profileId === room.hostProfileId;
   return {
-    version: "2.9",
+    version: "3.0",
     roomId: room.id,
     mode: room.mode,
     hostSeat: room.seats.findIndex((seat) => seat?.profileId === room.hostProfileId),
@@ -1404,6 +1425,10 @@ function handleAdminMessage(client, data) {
     adminData.playerScores.enabled = Boolean(data.enabled);
     saveAdminData();
     sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "玩家积分记录设置已保存。" });
+  } else if (data.type === "adminClearPlayerScoreHistory") {
+    adminData.playerScores.history = [];
+    saveAdminData();
+    sendJson(client.socket, { type: "adminData", data: publicAdminData(), message: "玩家积分明细已清空。" });
   } else if (data.type === "adminGetReplay") {
     const replay = adminData.replays.find((entry) => entry.id === data.replayId);
     sendJson(client.socket, replay ? { type: "adminReplay", replay } : { type: "adminError", message: "没有找到这局回放。" });

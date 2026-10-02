@@ -1,18 +1,18 @@
-# 青桌麻将 v2.6：1Panel Docker 部署
+# 青桌麻将 v3.0：1Panel Docker 部署
 
 ## 部署包
 
-使用 `majiang-v2.6-1panel.zip`。压缩包包含 v2.6 应用源码、牌面 SVG、`Dockerfile`、`docker-compose.yml` 和环境变量示例。
+使用 `majiang-v3.0-1panel.zip`。压缩包包含 v3.0 源码、本地 SVG 牌面、`Dockerfile`、`docker-compose.yml` 和环境变量示例。
 
-Compose 没有配置麻将应用的 `image:` 地址，会在服务器本地使用当前目录中的 Dockerfile 构建，不会从 Docker Hub 下载现成的麻将游戏镜像。Dockerfile 使用 `node:24-alpine` 作为基础环境；若服务器没有缓存该基础镜像，首次构建仍需获取 Node 基础镜像。
+Compose 不包含麻将应用的 `image:` 地址，会在服务器本地使用当前目录的 Dockerfile 构建应用镜像，不会从 Docker Hub 下载现成的麻将应用镜像。首次构建仍需获取 Dockerfile 使用的 `node:24-alpine` 基础镜像。
 
-## 一、上传并解压
+## 上传与解压
 
-1. 在 1Panel 的“文件”中创建 `/opt/majiang-v2.6`。
-2. 上传 `majiang-v2.6-1panel.zip` 并解压到该目录。
+1. 在 1Panel“文件”中创建 `/opt/majiang-v3.0`。
+2. 上传 `majiang-v3.0-1panel.zip` 并解压到该目录。
 3. 确认目录中直接包含 `docker-compose.yml`、`Dockerfile`、`server.js`、`package.json` 和 `public`。
 
-## 二、配置环境变量
+## 环境变量
 
 将 `.env.example` 复制为 `.env`：
 
@@ -20,54 +20,54 @@ Compose 没有配置麻将应用的 `image:` 地址，会在服务器本地使�
 BIND_ADDRESS=127.0.0.1
 MAJIANG_PORT=3019
 ADMIN_PASSWORD=请替换为自己的管理员密码
+MAJIANG_DATA_VOLUME=dongguang-mahjong-v30-data
+```
+
+- 使用域名和 1Panel 反向代理时，保持 `BIND_ADDRESS=127.0.0.1`。
+- 需要通过服务器 IP 和端口直接访问时，改为 `BIND_ADDRESS=0.0.0.0` 并放行端口。
+- 部署前建议修改 `ADMIN_PASSWORD`。
+
+## 从 v2.6 升级并保留数据
+
+如服务器正在使用 v2.6，且需要保留积分设置、玩家总分、积分明细和回放，请在 v3.0 的 `.env` 中继续使用旧数据卷：
+
+```env
 MAJIANG_DATA_VOLUME=dongguang-mahjong-v26-data
 ```
 
-- 使用域名和 1Panel 反向代理时保持 `BIND_ADDRESS=127.0.0.1`。
-- 需要通过服务器 IP 和端口访问时，改为 `BIND_ADDRESS=0.0.0.0` 并放行端口。
-- 建议部署前修改 `ADMIN_PASSWORD`。
-- 全新安装保持默认的 `MAJIANG_DATA_VOLUME=dongguang-mahjong-v26-data`。
+不要删除旧数据卷。v3.0 会自动兼容旧管理数据；旧数据没有积分明细时，会从空明细开始记录。
 
-## 三、从 v2.5 升级
+## 在 1Panel 本地构建
 
-v2.5 默认数据卷名称是 `dongguang-mahjong-v25-data`。需要保留原积分、管理员设置和回放时，在 v2.6 的 `.env` 中改为：
-
-```env
-MAJIANG_DATA_VOLUME=dongguang-mahjong-v25-data
-```
-
-然后再构建启动 v2.6。不要删除旧数据卷。确认 v2.6 数据完整后，可以停止并删除旧 v2.5 容器，但继续保留这个数据卷。
-
-## 四、在服务器本地构建
-
-1. 打开 1Panel 的“容器 → 编排”。
-2. 创建编排并选择 `/opt/majiang-v2.6/docker-compose.yml`。
-3. 选择“构建并启动”或启用“重新构建镜像”，不要选择仅拉取镜像。
-4. Compose 会使用 `build.context: .` 和当前目录中的 Dockerfile 构建应用。
-5. 容器名称为 `dongguang-mahjong-v26`，稍后健康状态应变为正常。
+1. 打开 1Panel“容器”→“编排”。
+2. 创建编排并选择 `/opt/majiang-v3.0/docker-compose.yml`。
+3. 选择“构建并启动”或“重新构建镜像”，不要选择仅拉取应用镜像。
+4. Compose 使用 `build.context: .` 和当前目录的 Dockerfile 构建。
+5. 容器 `dongguang-mahjong-v30` 的健康状态稍后应变为正常。
 
 也可以在服务器终端执行：
 
 ```bash
-cd /opt/majiang-v2.6
+cd /opt/majiang-v3.0
 docker compose up -d --build
 ```
 
-## 五、数据持久化
+## 数据持久化
 
-数据卷挂载到容器的 `/app/data`，以下数据会跨容器重启和重新构建保留：
+数据卷挂载到 `/app/data`，容器重启或重新构建后继续保留：
 
-- 管理员积分设置
-- 牌局回放及回放开关
-- 真实玩家积分及积分记录开关
-- 管理员改名、合并和删除记录后的结果
+- 管理员积分设置；
+- 牌局回放及回放开关；
+- 真实玩家总积分；
+- 玩家积分变动明细及记录开关；
+- 玩家改名、合并和删除记录后的结果。
 
 只有确定需要清空全部管理数据时，才在 1Panel 中手动删除数据卷。
 
-## 六、绑定域名和 HTTPS
+## 域名与 HTTPS
 
 1. 在 1Panel“网站”中创建反向代理网站。
-2. 代理地址填写 `http://127.0.0.1:3019`；修改端口后使用对应端口。
+2. 代理地址填写 `http://127.0.0.1:3019`。
 3. 申请或选择 SSL 证书并开启 HTTPS。
 4. 确认反向代理支持 WebSocket：
 
@@ -79,6 +79,6 @@ proxy_set_header Host $host;
 proxy_read_timeout 3600s;
 ```
 
-## 七、运行限制
+## 运行限制
 
-房间和正在进行的牌局保存在单个 Node 进程内，因此只运行一个容器副本。容器重启会结束进行中的牌局，但不会清除数据卷中的管理员设置、玩家积分和回放。
+房间和正在进行的牌局保存在单个 Node 进程内，因此只运行一个容器副本。容器重启会结束进行中的牌局，但不会清除数据卷中的管理员设置、玩家积分、积分明细和回放。
